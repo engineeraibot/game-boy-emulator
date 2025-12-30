@@ -41,3 +41,15 @@ use of this software.
 ## License
 
 This project is distributed under the MIT License.
+
+---
+
+## How to run
+
+To run it you can use any web server nginx or similar but in case you have python is just as simple as:
+
+python -m http.server 8000
+
+And then navigate with the browser to:
+
+http://localhost:8000/index.html

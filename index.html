@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>Game Boy</title>
+    <style>
+      body {
+        margin: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        background: #ffffff;
+      }
+
+      canvas {
+        /* Optional: scale up for visibility without blurring */
+        width: 320px;
+        height: 288px;
+        image-rendering: pixelated;
+        background: #000;
+      }
+    </style>
+    <script type="text/javascript" src="joypad.js"></script>
+    <script type="text/javascript" src="memorymanagementunit.js"></script>
+    <script type="text/javascript" src="cpu.js"></script>
+    <script type="text/javascript" src="pixelprocessingunit.js"></script>
+  </head>
+  <body>
+    <canvas id="screen" width="160" height="144"></canvas>
+    <div id="legend">
+      <p>Controls:</p>
+      <ul>
+        <li>Arrow Keys: D-Pad</li>
+        <li>a: A</li>
+        <li>s: B</li>
+        <li>j: Start</li>
+        <li>k: Select</li>
+      </ul>
+    </div>
+    <script>
+      const FPS = 60;
+      const CYCLES_PER_FRAME = 70224; // GB cycles per frame
+
+      async function main() {
+        const canvas = document.getElementById("screen");
+        const memoryManagementUnit = new MemoryManagementUnit();
+        const cpu = new Cpu(memoryManagementUnit);
+        const pixelProcessingUnit = new PixelProcessingUnit(canvas, memoryManagementUnit);
+        await memoryManagementUnit.loadROM("roms/game.gb");
+
+        window.addEventListener("keydown", (e) => {
+            switch (e.key) {
+                case "a": memoryManagementUnit.joypad.buttons.A = true; break;
+                case "s": memoryManagementUnit.joypad.buttons.B = true; break;
+                case "k": memoryManagementUnit.joypad.buttons.Select = true; break;
+                case "j": memoryManagementUnit.joypad.buttons.Start = true; break;
+                case "ArrowUp": memoryManagementUnit.joypad.buttons.Up = true; break;
+                case "ArrowDown": memoryManagementUnit.joypad.buttons.Down = true; break;
+                case "ArrowLeft": memoryManagementUnit.joypad.buttons.Left = true; break;
+                case "ArrowRight": memoryManagementUnit.joypad.buttons.Right = true; break;
+            }
+        });
+
+        window.addEventListener("keyup", (e) => {
+            switch (e.key) {
+                case "a": memoryManagementUnit.joypad.buttons.A = false; break;
+                case "s": memoryManagementUnit.joypad.buttons.B = false; break;
+                case "k": memoryManagementUnit.joypad.buttons.Select = false; break;
+                case "j": memoryManagementUnit.joypad.buttons.Start = false; break;
+                case "ArrowUp": memoryManagementUnit.joypad.buttons.Up = false; break;
+                case "ArrowDown": memoryManagementUnit.joypad.buttons.Down = false; break;
+                case "ArrowLeft": memoryManagementUnit.joypad.buttons.Left = false; break;
+                case "ArrowRight": memoryManagementUnit.joypad.buttons.Right = false; break;
+            }
+        });
+
+        function frame() {
+          let cyclesThisFrame = 0;
+
+          while (cyclesThisFrame < CYCLES_PER_FRAME) {
+              memoryManagementUnit.joypad.update();
+              const cycles = cpu.executeStep(); // returns cycles used
+              memoryManagementUnit.step(cycles);
+              pixelProcessingUnit.step(cycles);
+              cyclesThisFrame += cycles;
+
+              // Optional: also step APU here
+          }
+
+          requestAnimationFrame(frame); // schedule next frame
+        }
+
+        frame(); // start the loop
+      }
+      main();
+    </script>
+  </body>
+</html>
