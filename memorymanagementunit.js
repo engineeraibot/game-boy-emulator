@@ -181,6 +181,14 @@ class MemoryManagementUnit {
     ) {
         address &= 0xFFFF;
 
+        if (address >= 0xE000 && address < 0xFE00) {
+            address -= 0x2000;
+        }
+
+        if (address >= 0xFEA0 && address < 0xFEFF) {
+            return 0xFF;
+        }
+
         // Joypad register
         if (address === 0xFF00) { // Joypad register
             return this.joypad.read();
@@ -261,6 +269,14 @@ class MemoryManagementUnit {
     ) {
         address &= 0xFFFF;
         value &= 0xFF;
+
+        if (address >= 0xE000 && address < 0xFE00) {
+            address -= 0x2000;
+        }
+
+        if (address >= 0xFEA0 && address < 0xFEFF) {
+            return;
+        }
 
         if (this.mbcType === "MBC3") {
             // RAM/RTC enable
