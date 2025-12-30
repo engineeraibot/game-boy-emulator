@@ -1,3 +1,35 @@
+function encodeBytes(u8) {
+    if (!u8) return null;
+    let binary = "";
+    const chunk = 0x4000;
+    for (let i = 0; i < u8.length; i += chunk) {
+        const slice = u8.subarray(i, i + chunk);
+        binary += String.fromCharCode.apply(null, slice);
+    }
+    return btoa(binary);
+}
+
+function decodeBytes(str) {
+    if (!str) return null;
+    const binary = atob(str);
+    const out = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        out[i] = binary.charCodeAt(i);
+    }
+    return out;
+}
+
+function toUint8(source, fallbackLength = 0) {
+    if (!source && source !== 0) {
+        return fallbackLength ? new Uint8Array(fallbackLength) : null;
+    }
+    if (typeof source === "string") return decodeBytes(source);
+    if (source instanceof Uint8Array) return source;
+    if (source instanceof ArrayBuffer) return new Uint8Array(source);
+    if (Array.isArray(source)) return new Uint8Array(source);
+    return fallbackLength ? new Uint8Array(fallbackLength) : null;
+}
+
 class MemoryManagementUnit {
 
     constructor () {
@@ -89,6 +121,43 @@ class MemoryManagementUnit {
         this.memory[0xFF4A] = 0x00; // WY
         this.memory[0xFF4B] = 0x00; // WX
         this.memory[0xFFFF] = 0x00; // IE
+    }
+
+    getState() {
+        return {
+            memoryB64: encodeBytes(this.memory),
+            romB64: this.rom ? encodeBytes(this.rom) : null,
+            romBankNumber: this.romBankNumber,
+            ramBankNumber: this.ramBankNumber,
+            mbc1Mode: this.mbc1Mode,
+            externalRamEnabled: this.externalRamEnabled,
+            ramBanksB64: encodeBytes(this.ramBanks),
+            divCounter: this.divCounter,
+            timerCounter: this.timerCounter,
+            joypad: {
+                buttons: { ...this.joypad.buttons },
+                memoryValue: this.joypad.memoryValue
+            }
+        };
+    }
+
+    setState(state) {
+        if (!state) return;
+        this.memory = toUint8(state.memoryB64 ?? state.memory, 0x10000);
+        this.rom = toUint8(state.romB64 ?? state.rom, 0);
+        this.romBankNumber = state.romBankNumber ?? 1;
+        this.ramBankNumber = state.ramBankNumber ?? 0;
+        this.mbc1Mode = state.mbc1Mode ?? 0;
+        this.externalRamEnabled = !!state.externalRamEnabled;
+        this.ramBanks = toUint8(state.ramBanksB64 ?? state.ramBanks, 0x8000);
+        this.divCounter = state.divCounter ?? 0;
+        this.timerCounter = state.timerCounter ?? 0;
+        if (state.joypad?.buttons) {
+          this.joypad.buttons = { ...state.joypad.buttons };
+        }
+        if (typeof state.joypad?.memoryValue === "number") {
+          this.joypad.memoryValue = state.joypad.memoryValue;
+        }
     }
 
     read8bits(

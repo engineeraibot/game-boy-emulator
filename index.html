@@ -6,7 +6,7 @@
     <title>Game Boy</title>
     <style>
       :root {
-        --btn-size: 56px;
+        --btn-size: 60px;
         --btn-gap: 8px;
       }
 
@@ -68,6 +68,7 @@
         justify-content: center;
         gap: 12px;
         align-items: center;
+        flex-wrap: wrap;
       }
 
       .rom-button {
@@ -194,18 +195,20 @@
 
       @media (max-width: 640px) {
         :root {
-          --btn-size: clamp(44px, 12vw, 56px);
+          --btn-size: clamp(50px, 13vw, 64px);
           --btn-gap: 6px;
         }
 
         main {
           padding: 8px 12px;
+          align-items: flex-start;
+          justify-content: flex-start;
         }
 
         canvas {
           width: 100%;
           max-width: 100%;
-          max-height: 58vh;
+          max-height: 52vh;
         }
 
         .touch-controls {
@@ -253,6 +256,9 @@
         <div class="rom-loader">
           <input type="file" id="rom-input" accept=".gb,.gbc,application/octet-stream" style="display:none" aria-label="Select Game Boy ROM">
           <button type="button" id="rom-button" class="rom-button">Load ROM</button>
+          <button type="button" id="save-state" class="rom-button">Save State</button>
+          <input type="file" id="state-input" accept=".state,application/json" style="display:none" aria-label="Load saved state">
+          <button type="button" id="load-state" class="rom-button">Load State</button>
           <span id="rom-filename" class="rom-filename" aria-live="polite"></span>
         </div>
         <div class="touch-controls" aria-label="On-screen controls">
@@ -276,7 +282,7 @@
         </div>
         <div class="footer-text">
           <div class="keyboard-legend" id="legend">
-            <p>Controls: Arrow Keys (D-Pad) · a=A · s=B · j=Start · k=Select</p>
+            <p>Controls: Arrow Keys (D-Pad) | a=A | s=B | j=Start | k=Select</p>
           </div>
           <div>
             <p>
@@ -334,6 +340,9 @@
         const romInput = document.getElementById("rom-input");
         const romButton = document.getElementById("rom-button");
         const romFilenameLabel = document.getElementById("rom-filename");
+        const saveStateButton = document.getElementById("save-state");
+        const loadStateButton = document.getElementById("load-state");
+        const stateInput = document.getElementById("state-input");
 
         const memoryManagementUnit = new MemoryManagementUnit();
         const cpu = new Cpu(memoryManagementUnit);
@@ -341,12 +350,53 @@
 
         let romReady = false;
         let animationHandle = null;
+        let currentRomName = "";
 
         const setRomLabel = (name) => {
           if (romFilenameLabel) {
             romFilenameLabel.textContent = name || "";
             romFilenameLabel.title = name || "";
           }
+        };
+
+        const pad = (value) => String(value).padStart(2, "0");
+
+        const encodeBytes = (u8) => {
+          if (!u8) return null;
+          let binary = "";
+          const chunk = 0x4000;
+          for (let i = 0; i < u8.length; i += chunk) {
+            binary += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
+          }
+          return btoa(binary);
+        };
+
+        const decodeBytes = (str) => {
+          if (!str) return null;
+          const binary = atob(str);
+          const out = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) {
+            out[i] = binary.charCodeAt(i);
+          }
+          return out;
+        };
+
+        const toUint8 = (source, fallbackLength = 0) => {
+          if (!source && source !== 0) {
+            return fallbackLength ? new Uint8Array(fallbackLength) : null;
+          }
+          if (typeof source === "string") return decodeBytes(source);
+          if (source instanceof Uint8Array) return source;
+          if (source instanceof ArrayBuffer) return new Uint8Array(source);
+          if (Array.isArray(source)) return new Uint8Array(source);
+          return fallbackLength ? new Uint8Array(fallbackLength) : null;
+        };
+
+        const formatStateFilename = () => {
+          const base = currentRomName ? currentRomName.replace(/\.[^/.]+$/, "") : "state";
+          const safeBase = (base.replace(/[^a-zA-Z0-9_-]+/g, "") || "state").toLowerCase();
+          const now = new Date();
+          return `${safeBase}_${now.getFullYear()}_${pad(now.getMonth() + 1)}_${pad(now.getDate())}_${pad(now.getHours())}_${pad(now.getMinutes())}_${pad(now.getSeconds())}.state`;
         };
 
         const startLoopIfNeeded = () => {
@@ -363,8 +413,63 @@
           cpu.reset();
           pixelProcessingUnit.reset();
           romReady = true;
-          setRomLabel(file.name);
+          currentRomName = file.name;
+          setRomLabel(currentRomName);
           startLoopIfNeeded();
+        };
+
+        const createSnapshot = () => {
+          return {
+            version: 1,
+            romName: currentRomName,
+            timestamp: Date.now(),
+            cpu: cpu.getState(),
+            mmu: memoryManagementUnit.getState(),
+            ppu: pixelProcessingUnit.getState(),
+          };
+        };
+
+        const downloadState = () => {
+          if (!romReady) {
+            console.warn("No ROM loaded; cannot save state.");
+            return;
+          }
+          const snapshot = createSnapshot();
+          const blob = new Blob([JSON.stringify(snapshot)], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = formatStateFilename();
+          a.style.display = "none";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        };
+
+        const loadStateFromFile = async (file) => {
+          if (!file) return;
+          try {
+            const text = await file.text();
+            const snapshot = JSON.parse(text);
+            romReady = false;
+            if (snapshot.mmu) {
+              memoryManagementUnit.setState(snapshot.mmu);
+            }
+            if (snapshot.cpu) {
+              cpu.setState(snapshot.cpu);
+            }
+            if (snapshot.ppu) {
+              pixelProcessingUnit.setState(snapshot.ppu);
+            }
+            currentRomName = snapshot.romName || currentRomName || "state";
+            setRomLabel(currentRomName);
+            romReady = !!memoryManagementUnit.rom;
+          } catch (err) {
+            console.error("Failed to load state", err);
+          } finally {
+            startLoopIfNeeded();
+          }
         };
 
         if (romButton && romInput) {
@@ -373,6 +478,23 @@
             const file = event.target.files?.[0];
             if (file) {
               loadRomFromFile(file).catch(console.error);
+            }
+            event.target.value = "";
+          });
+        }
+
+        if (saveStateButton) {
+          saveStateButton.addEventListener("click", () => {
+            downloadState();
+          });
+        }
+
+        if (loadStateButton && stateInput) {
+          loadStateButton.addEventListener("click", () => stateInput.click());
+          stateInput.addEventListener("change", (event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              loadStateFromFile(file).catch(console.error);
             }
             event.target.value = "";
           });

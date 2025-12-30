@@ -30,6 +30,24 @@ class PixelProcessingUnit {
         this.updateStatMode(2, true, 0);
     }
 
+    getState() {
+        return {
+            ppuClock: this.ppuClock,
+            mode: this.mode,
+            scxPerLine: Array.from(this.scxPerLine),
+            scyPerLine: Array.from(this.scyPerLine),
+        };
+    }
+
+    setState(state) {
+        if (!state) return;
+        this.ppuClock = state.ppuClock ?? 0;
+        this.mode = state.mode ?? 2;
+        if (state.scxPerLine) this.scxPerLine = new Uint8Array(state.scxPerLine);
+        if (state.scyPerLine) this.scyPerLine = new Uint8Array(state.scyPerLine);
+        // LY/stat registers reside in MMU memory; they should be restored via MMU state.
+    }
+
     step(cycles) {
         const lcdc = this.mmu.read8bits(0xFF40);
         const lcdEnabled = (lcdc & 0x80) !== 0;

@@ -25,6 +25,39 @@ class Cpu {
         this.interruptMasterEnable = false; // ime
     }
 
+    getState() {
+        return {
+            A: this.A,
+            F: this.F,
+            B: this.B,
+            C: this.C,
+            D: this.D,
+            E: this.E,
+            H: this.H,
+            L: this.L,
+            SP: this.SP,
+            PC: this.PC,
+            halted: this.halted,
+            interruptMasterEnable: this.interruptMasterEnable
+        };
+    }
+
+    setState(state) {
+        if (!state) return;
+        this.A = state.A ?? this.A;
+        this.F = state.F ?? this.F;
+        this.B = state.B ?? this.B;
+        this.C = state.C ?? this.C;
+        this.D = state.D ?? this.D;
+        this.E = state.E ?? this.E;
+        this.H = state.H ?? this.H;
+        this.L = state.L ?? this.L;
+        this.SP = state.SP ?? this.SP;
+        this.PC = state.PC ?? this.PC;
+        this.halted = !!state.halted;
+        this.interruptMasterEnable = !!state.interruptMasterEnable;
+    }
+
     get AF() {
         return (this.A << 8) | this.F;
     }
