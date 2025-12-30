@@ -4,21 +4,228 @@
     <meta charset="UTF-8">
     <title>Game Boy</title>
     <style>
+      :root {
+        --btn-size: 56px;
+        --btn-gap: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
         margin: 0;
-        display: flex;
-        justify-content: center;
-        align-items: center;
         height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
         background: #ffffff;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+        color: #111111;
+      }
+
+      main {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        padding: 12px 16px;
       }
 
       canvas {
-        /* Optional: scale up for visibility without blurring */
-        width: 320px;
-        height: 288px;
+        width: min(100vw, 540px);
+        max-width: 540px;
+        max-height: 70vh;
+        aspect-ratio: 160 / 144;
+        height: auto;
         image-rendering: pixelated;
         background: #000;
+        border-radius: 8px;
+      }
+
+      footer {
+        width: 100%;
+        padding: 12px 16px;
+        background: #f5f5f5;
+      }
+
+      .footer-inner {
+        max-width: 1000px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .rom-loader {
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .rom-button {
+        border: 1px solid #d0d0d0;
+        border-radius: 10px;
+        background: linear-gradient(180deg, #fafafa, #e1e1e1);
+        padding: 10px 16px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        color: #222222;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+        transition: transform 0.06s ease, box-shadow 0.06s ease;
+      }
+
+      .rom-button:active {
+        transform: translateY(1px);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+      }
+
+      .rom-filename {
+        font-size: 13px;
+        color: #444444;
+        max-width: 50vw;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .touch-controls {
+        display: none;
+        flex-wrap: wrap;
+        gap: 20px;
+        justify-content: center;
+        width: 100%;
+      }
+
+      .dpad {
+        display: grid;
+        grid-template-areas:
+          ". up ."
+          "left center right"
+          ". down .";
+        grid-template-columns: repeat(3, var(--btn-size));
+        grid-template-rows: repeat(3, var(--btn-size));
+        gap: var(--btn-gap);
+      }
+
+      .dpad .up { grid-area: up; }
+      .dpad .down { grid-area: down; }
+      .dpad .left { grid-area: left; }
+      .dpad .right { grid-area: right; }
+      .dpad .spacer { grid-area: center; }
+
+      .action-buttons {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .ab-buttons {
+        display: flex;
+        gap: 14px;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .meta-buttons {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+      }
+
+      .control-btn {
+        border: 1px solid #d0d0d0;
+        border-radius: 12px;
+        background: linear-gradient(180deg, #fafafa, #dedede);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        min-width: var(--btn-size);
+        min-height: var(--btn-size);
+        font-size: 16px;
+        font-weight: 600;
+        color: #222222;
+        cursor: pointer;
+        touch-action: none;
+        user-select: none;
+        transition: transform 0.06s ease, box-shadow 0.06s ease;
+      }
+
+      .control-btn:active {
+        transform: translateY(1px);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+      }
+
+      .small-btn {
+        min-width: 86px;
+        min-height: 38px;
+        font-size: 14px;
+        border-radius: 10px;
+      }
+
+      .footer-text {
+        text-align: center;
+        font-size: 14px;
+        color: #444444;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      #legend {
+        margin: 0;
+      }
+
+      #legend p {
+        margin: 0;
+        font-weight: 600;
+      }
+
+      footer p {
+        margin: 0;
+      }
+
+      @media (max-width: 640px) {
+        :root {
+          --btn-size: clamp(44px, 12vw, 56px);
+          --btn-gap: 6px;
+        }
+
+        main {
+          padding: 8px 12px;
+        }
+
+        canvas {
+          width: 100%;
+          max-width: 100%;
+          max-height: 58vh;
+        }
+
+        .touch-controls {
+          gap: 14px;
+          display: flex;
+        }
+
+        .keyboard-legend {
+          display: none;
+        }
+      }
+
+      @media (min-width: 641px) {
+        canvas {
+          max-height: 72vh;
+          width: min(88vw, 620px);
+        }
+
+        .touch-controls {
+          display: none;
+        }
       }
     </style>
     <script type="text/javascript" src="joypad.js"></script>
@@ -27,38 +234,138 @@
     <script type="text/javascript" src="pixelprocessingunit.js"></script>
   </head>
   <body>
-    <canvas id="screen" width="160" height="144"></canvas>
-    <div id="legend">
-      <p>Controls:</p>
-      <ul>
-        <li>Arrow Keys: D-Pad</li>
-        <li>a: A</li>
-        <li>s: B</li>
-        <li>j: Start</li>
-        <li>k: Select</li>
-      </ul>
-    </div>
+    <main>
+      <canvas id="screen" width="160" height="144"></canvas>
+    </main>
     <footer>
-      <p>
-        This is an independent, open-source Game Boy emulator.
-        Not affiliated with or endorsed by Nintendo.
-        Game Boy is a trademark of Nintendo Co., Ltd.
-      </p>
-      <p>
-        This site does not host or distribute game ROMs or firmware.
-        Users must provide their own legally obtained copies.
-      </p>
+      <div class="footer-inner">
+        <div class="rom-loader">
+          <input type="file" id="rom-input" accept=".gb,.gbc,application/octet-stream" style="display:none" aria-label="Select Game Boy ROM">
+          <button type="button" id="rom-button" class="rom-button">Load ROM</button>
+          <span id="rom-filename" class="rom-filename" aria-live="polite"></span>
+        </div>
+        <div class="touch-controls" aria-label="On-screen controls">
+          <div class="dpad" aria-label="Directional pad">
+            <button type="button" class="control-btn up" data-button="Up" aria-label="Up">Up</button>
+            <button type="button" class="control-btn left" data-button="Left" aria-label="Left">Left</button>
+            <div class="spacer"></div>
+            <button type="button" class="control-btn right" data-button="Right" aria-label="Right">Right</button>
+            <button type="button" class="control-btn down" data-button="Down" aria-label="Down">Down</button>
+          </div>
+          <div class="action-buttons">
+            <div class="ab-buttons">
+              <button type="button" class="control-btn" data-button="B" aria-label="B button">B</button>
+              <button type="button" class="control-btn" data-button="A" aria-label="A button">A</button>
+            </div>
+            <div class="meta-buttons">
+              <button type="button" class="control-btn small-btn" data-button="Select" aria-label="Select">Select</button>
+              <button type="button" class="control-btn small-btn" data-button="Start" aria-label="Start">Start</button>
+            </div>
+          </div>
+        </div>
+        <div class="footer-text">
+          <div class="keyboard-legend" id="legend">
+            <p>Controls: Arrow Keys (D-Pad) · a=A · s=B · j=Start · k=Select</p>
+          </div>
+          <div>
+            <p>
+              This is an independent, open-source Game Boy emulator.
+              Not affiliated with or endorsed by Nintendo.
+              Game Boy is a trademark of Nintendo Co., Ltd.
+            </p>
+            <p>
+              This site does not host or distribute game ROMs or firmware.
+              Users must provide their own legally obtained copies.
+            </p>
+          </div>
+        </div>
+      </div>
     </footer>
     <script>
       const FPS = 60;
       const CYCLES_PER_FRAME = 70224; // GB cycles per frame
 
+      function bindOnScreenControls(memoryManagementUnit) {
+        const buttonElements = document.querySelectorAll("[data-button]");
+        const setButtonState = (button, pressed) => {
+          if (memoryManagementUnit?.joypad?.buttons?.hasOwnProperty(button)) {
+            memoryManagementUnit.joypad.buttons[button] = pressed;
+          }
+        };
+
+        buttonElements.forEach((element) => {
+          const buttonName = element.dataset.button;
+
+          const press = (event) => {
+            event.preventDefault();
+            element.setPointerCapture?.(event.pointerId);
+            setButtonState(buttonName, true);
+          };
+
+          const release = (event) => {
+            event.preventDefault();
+            setButtonState(buttonName, false);
+            if (element.hasPointerCapture?.(event.pointerId)) {
+              element.releasePointerCapture(event.pointerId);
+            }
+          };
+
+          element.addEventListener("pointerdown", press);
+          element.addEventListener("pointerup", release);
+          element.addEventListener("pointercancel", release);
+          element.addEventListener("pointerleave", release);
+          element.addEventListener("pointerout", release);
+        });
+      }
+
       async function main() {
         const canvas = document.getElementById("screen");
+        const romInput = document.getElementById("rom-input");
+        const romButton = document.getElementById("rom-button");
+        const romFilenameLabel = document.getElementById("rom-filename");
+
         const memoryManagementUnit = new MemoryManagementUnit();
         const cpu = new Cpu(memoryManagementUnit);
         const pixelProcessingUnit = new PixelProcessingUnit(canvas, memoryManagementUnit);
-        await memoryManagementUnit.loadROM("roms/game.gb");
+
+        let romReady = false;
+        let animationHandle = null;
+
+        const setRomLabel = (name) => {
+          if (romFilenameLabel) {
+            romFilenameLabel.textContent = name || "";
+            romFilenameLabel.title = name || "";
+          }
+        };
+
+        const startLoopIfNeeded = () => {
+          if (!animationHandle) {
+            animationHandle = requestAnimationFrame(frame);
+          }
+        };
+
+        const loadRomFromFile = async (file) => {
+          if (!file) return;
+          const buffer = await file.arrayBuffer();
+          romReady = false;
+          await memoryManagementUnit.loadROM(buffer);
+          cpu.reset();
+          pixelProcessingUnit.reset();
+          romReady = true;
+          setRomLabel(file.name);
+          startLoopIfNeeded();
+        };
+
+        if (romButton && romInput) {
+          romButton.addEventListener("click", () => romInput.click());
+          romInput.addEventListener("change", (event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              loadRomFromFile(file).catch(console.error);
+            }
+            event.target.value = "";
+          });
+        }
 
         window.addEventListener("keydown", (e) => {
             switch (e.key) {
@@ -86,7 +393,14 @@
             }
         });
 
+        bindOnScreenControls(memoryManagementUnit);
+
         function frame() {
+          if (!romReady) {
+            animationHandle = requestAnimationFrame(frame);
+            return;
+          }
+
           let cyclesThisFrame = 0;
 
           while (cyclesThisFrame < CYCLES_PER_FRAME) {
@@ -99,10 +413,10 @@
               // Optional: also step APU here
           }
 
-          requestAnimationFrame(frame); // schedule next frame
+          animationHandle = requestAnimationFrame(frame); // schedule next frame
         }
 
-        frame(); // start the loop
+        startLoopIfNeeded();
       }
       main();
     </script>

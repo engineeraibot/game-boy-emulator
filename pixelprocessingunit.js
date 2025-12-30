@@ -21,6 +21,15 @@ class PixelProcessingUnit {
         ];
     }
 
+    reset() {
+        this.ppuClock = 0;
+        this.mode = 2;
+        this.scxPerLine.fill(0);
+        this.scyPerLine.fill(0);
+        this.mmu.write8bits(0xFF44, 0);
+        this.updateStatMode(2, true, 0);
+    }
+
     step(cycles) {
         const lcdc = this.mmu.read8bits(0xFF40);
         const lcdEnabled = (lcdc & 0x80) !== 0;

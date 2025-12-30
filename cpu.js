@@ -2,7 +2,10 @@ class Cpu {
 
     constructor(memoryManagementUnit) {
         this.memoryManagementUnit = memoryManagementUnit;
+        this.reset();
+    }
 
+    reset() {
         // 8-bit registers
         this.A = 0x01;
         this.F = 0xB0;

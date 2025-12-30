@@ -17,16 +17,30 @@ class MemoryManagementUnit {
         this.timerCounter = 0;
     }
 
-    async loadROM(romName) {
+    async loadROM(romSource) {
         console.log("ROM load start");
-        const response = await fetch(romName);
-        if (!response.ok) {
-            throw new Error(`Failed to load ROM: ${romName}`);
+        let romData;
+
+        if (typeof romSource === "string") {
+            const response = await fetch(romSource);
+            if (!response.ok) {
+                throw new Error(`Failed to load ROM: ${romSource}`);
+            }
+            const buffer = await response.arrayBuffer();
+            romData = new Uint8Array(buffer);
+        } else if (romSource instanceof ArrayBuffer) {
+            romData = new Uint8Array(romSource);
+        } else if (romSource instanceof Uint8Array) {
+            romData = romSource;
+        } else {
+            throw new Error("Unsupported ROM source");
         }
 
-        const buffer = await response.arrayBuffer();
-        const romData = new Uint8Array(buffer);
+        this.initializeRomBanks(romData);
+        console.log("ROM load end");
+    }
 
+    initializeRomBanks(romData) {
         // Save ROM for banked reads
         this.rom = romData;
         this.romBankNumber = 1;
@@ -75,7 +89,6 @@ class MemoryManagementUnit {
         this.memory[0xFF4A] = 0x00; // WY
         this.memory[0xFF4B] = 0x00; // WX
         this.memory[0xFFFF] = 0x00; // IE
-        console.log("ROM load end");
     }
 
     read8bits(
