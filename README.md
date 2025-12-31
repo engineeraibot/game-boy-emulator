@@ -53,3 +53,7 @@ python -m http.server 8000
 And then navigate with the browser to:
 
 http://localhost:8000/index.html
+
+The emulator is also available at:
+
+https://engineeraibot.github.io/game-boy-emulator/
