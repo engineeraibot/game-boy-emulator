@@ -16,7 +16,7 @@
 
       body {
         margin: 0;
-        height: 100vh;
+        height: 100dvh;
         overflow: hidden;
         display: flex;
         flex-direction: column;
@@ -52,6 +52,7 @@
         width: 100%;
         padding: 12px 16px;
         background: #f5f5f5;
+        padding-bottom: env(safe-area-inset-bottom, 12px);
       }
 
       .footer-inner {
@@ -215,6 +216,7 @@
         .touch-controls {
           gap: 14px;
           display: flex;
+          flex-wrap: nowrap;
         }
 
         .keyboard-legend {
