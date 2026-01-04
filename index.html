@@ -16,8 +16,9 @@
 
       body {
         margin: 0;
-        height: 100dvh;
-        overflow: hidden;
+        min-height: 100dvh;
+        overflow-x: hidden;
+        overflow-y: auto;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -197,30 +198,42 @@
 
       @media (max-width: 640px) {
         :root {
-          --btn-size: clamp(50px, 13vw, 64px);
-          --btn-gap: 6px;
+          --btn-size: clamp(44px, 12vw, 56px);
+          --btn-gap: 5px;
         }
 
         main {
           padding: 8px 12px;
           align-items: flex-start;
-          justify-content: flex-start;
+          justify-content: center;
         }
 
         canvas {
           width: 100%;
           max-width: 100%;
-          max-height: 52vh;
+          max-height: 48vh;
         }
 
         .touch-controls {
-          gap: 14px;
+          gap: 10px;
           display: flex;
-          flex-wrap: nowrap;
+          flex-wrap: wrap;
+          justify-content: center;
         }
 
         .keyboard-legend {
           display: none;
+        }
+
+        .small-btn {
+          min-width: 72px;
+          min-height: 34px;
+          font-size: 13px;
+        }
+
+        footer {
+          padding: 10px 12px;
+          padding-bottom: env(safe-area-inset-bottom, 10px);
         }
       }
 
@@ -232,6 +245,22 @@
 
         .touch-controls {
           display: none;
+        }
+      }
+
+      @media (max-height: 700px) {
+        :root {
+          --btn-size: clamp(40px, 11vw, 50px);
+          --btn-gap: 4px;
+        }
+
+        canvas {
+          max-height: 42vh;
+        }
+
+        .small-btn {
+          min-width: 66px;
+          min-height: 32px;
         }
       }
 
