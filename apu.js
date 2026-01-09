@@ -1,6 +1,6 @@
 // Constants
 const SAMPLE_RATE = 44100;
-const BUFFER_SIZE = 4096;
+const APU_CHUNK_SIZE = 2048;
 const FRAME_SEQUENCER_RATE = 512;
 const CYCLES_PER_SECOND = 4194304;
 const CYCLES_PER_SAMPLE = CYCLES_PER_SECOND / SAMPLE_RATE;
@@ -9,7 +9,7 @@ class AudioProcessingUnit {
     constructor(memoryManagementUnit) {
         this.mmu = memoryManagementUnit;
         this.audioContext = null;
-        this.scriptProcessor = null;
+        this.workletNode = null;
         this.soundEnabled = false;
 
         this.channel1 = new PulseChannel(true);
@@ -28,12 +28,12 @@ class AudioProcessingUnit {
         this.frameSequencerStep = 0;
 
         this.sampleClock = 0;
-        this.buffer = new Float32Array(BUFFER_SIZE * 2);
+        this.buffer = new Float32Array(APU_CHUNK_SIZE);
         this.bufferPtr = 0;
     }
 
     step(cycles) {
-        if (!this.soundEnabled) {
+        if (!this.soundEnabled || !this.workletNode) {
             return;
         }
 
@@ -53,7 +53,7 @@ class AudioProcessingUnit {
         this.sampleClock += cycles;
         if (this.sampleClock >= CYCLES_PER_SAMPLE) {
             this.sampleClock -= CYCLES_PER_SAMPLE;
-            this.mixSamples();
+            this.mixAndBufferSample();
         }
     }
 
@@ -81,9 +81,9 @@ class AudioProcessingUnit {
         this.frameSequencerStep = (this.frameSequencerStep + 1) % 8;
     }
 
-    mixSamples() {
-        if (this.bufferPtr >= BUFFER_SIZE * 2) {
-            return;
+    mixAndBufferSample() {
+        if (this.bufferPtr >= APU_CHUNK_SIZE) {
+            this.flushBuffer();
         }
 
         const s1 = this.channel1.getSample() / 15;
@@ -114,22 +114,24 @@ class AudioProcessingUnit {
         this.buffer[this.bufferPtr++] = right;
     }
 
-    initAudio() {
-        if (this.audioContext) return;
+    flushBuffer() {
+        if (this.bufferPtr > 0) {
+            this.workletNode.port.postMessage(this.buffer.subarray(0, this.bufferPtr));
+            this.bufferPtr = 0;
+        }
+    }
+
+    async initAudio() {
+        if (this.audioContext) {
+            this.audioContext.resume();
+            return;
+        };
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
             sampleRate: SAMPLE_RATE,
         });
-        this.scriptProcessor = this.audioContext.createScriptProcessor(BUFFER_SIZE, 0, 2);
-        this.scriptProcessor.onaudioprocess = (e) => {
-            const left = e.outputBuffer.getChannelData(0);
-            const right = e.outputBuffer.getChannelData(1);
-            for (let i = 0; i < BUFFER_SIZE; i++) {
-                left[i] = this.buffer[i * 2];
-                right[i] = this.buffer[i * 2 + 1];
-            }
-            this.bufferPtr = 0;
-        };
-        this.scriptProcessor.connect(this.audioContext.destination);
+        await this.audioContext.audioWorklet.addModule('audio-processor.js');
+        this.workletNode = new AudioWorkletNode(this.audioContext, 'gameboy-audio-processor');
+        this.workletNode.connect(this.audioContext.destination);
     }
 
     readRegister(address) {
@@ -186,13 +188,13 @@ class AudioProcessingUnit {
                     const wasEnabled = this.soundEnabled;
                     this.soundEnabled = (value & 0x80) !== 0;
                     if (this.soundEnabled && !wasEnabled) {
-                        this.initAudio();
+                        this.initAudio().catch(console.error);
                         this.reset();
-                    }
-                    if (!this.soundEnabled) {
-                        // Reset all registers on power off
+                    } else if (!this.soundEnabled && wasEnabled) {
+                        this.flushBuffer();
+                        if (this.audioContext) this.audioContext.suspend();
                         for (let i = 0xFF10; i <= 0xFF25; i++) {
-                            this.writeRegister(i, 0);
+                            if (i !== 0xFF26) this.writeRegister(i, 0);
                         }
                     }
                     break;
