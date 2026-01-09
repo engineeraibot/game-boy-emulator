@@ -93,6 +93,21 @@ class NoiseChannel {
         return this.volume;
     }
 
+    readRegister(address) {
+        switch (address) {
+            case 0xFF20: // NR41
+                return 0xC0 | (this.lengthLoad & 0x3F);
+            case 0xFF21: // NR42
+                return (this.initialVolume << 4) | (this.envelopeDirection ? 0x08 : 0) | (this.envelopePeriod & 0x07);
+            case 0xFF22: // NR43
+                return (this.shiftClockFrequency << 4) | (this.counterStep ? 0x08 : 0) | (this.dividingRatio & 0x07);
+            case 0xFF23: // NR44
+                return 0xBF | (this.lengthEnabled ? 0x40 : 0);
+            default:
+                return 0xFF;
+        }
+    }
+
     writeRegister(address, value) {
         switch (address) {
             case 0xFF20: // NR41

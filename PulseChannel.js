@@ -141,6 +141,30 @@ class PulseChannel {
         return dutyPattern[this.waveStep] * this.volume;
     }
 
+    readRegister(address) {
+        switch (address) {
+            case 0xFF10: // NR10
+                if (!this.hasSweep) {
+                    return 0xFF;
+                }
+                return 0x80 | (this.sweepPeriod << 4) | (this.sweepDirection << 3) | (this.sweepShift & 0x07);
+            case 0xFF11: // NR11
+            case 0xFF16: // NR21
+                return (this.duty << 6) | (this.lengthLoad & 0x3F);
+            case 0xFF12: // NR12
+            case 0xFF17: // NR22
+                return (this.initialVolume << 4) | (this.envelopeDirection ? 0x08 : 0) | (this.envelopePeriod & 0x07);
+            case 0xFF13: // NR13
+            case 0xFF18: // NR23
+                return this.frequency & 0xFF;
+            case 0xFF14: // NR14
+            case 0xFF19: // NR24
+                return 0x80 | (this.lengthEnabled ? 0x40 : 0) | 0x38 | ((this.frequency >> 8) & 0x07);
+            default:
+                return 0xFF;
+        }
+    }
+
     writeRegister(address, value) {
         // NRx0
         if (this.hasSweep && (address === 0xFF10)) {

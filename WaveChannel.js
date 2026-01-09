@@ -71,6 +71,23 @@ class WaveChannel {
         return sample;
     }
 
+    readRegister(address) {
+        switch (address) {
+            case 0xFF1A: // NR30
+                return (this.dacEnabled ? 0x80 : 0) | 0x7F;
+            case 0xFF1B: // NR31
+                return this.lengthLoad & 0xFF;
+            case 0xFF1C: // NR32
+                return 0x9F | ((this.volumeCode & 0x03) << 5);
+            case 0xFF1D: // NR33
+                return this.frequency & 0xFF;
+            case 0xFF1E: // NR34
+                return 0x80 | (this.lengthEnabled ? 0x40 : 0) | 0x38 | ((this.frequency >> 8) & 0x07);
+            default:
+                return 0xFF;
+        }
+    }
+
     writeRegister(address, value) {
         switch (address) {
             case 0xFF1A: // NR30

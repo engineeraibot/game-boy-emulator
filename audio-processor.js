@@ -22,22 +22,40 @@ class GameBoyAudioProcessor extends AudioWorkletProcessor {
 
   process(inputs, outputs, parameters) {
     const output = outputs[0];
+    if (!output || output.length === 0) {
+      return true;
+    }
     const left = output[0];
-    const right = output[1];
+    const right = output.length > 1 ? output[1] : null;
 
     if (this.bufferPtr > 0) {
-      for (let i = 0; i < left.length && i * 2 < this.bufferPtr; i++) {
-        left[i] = this.buffer[i * 2];
-        right[i] = this.buffer[i * 2 + 1];
+      const framesAvailable = Math.min(left.length, Math.floor(this.bufferPtr / 2));
+      for (let i = 0; i < framesAvailable; i++) {
+        const leftSample = this.buffer[i * 2];
+        const rightSample = this.buffer[i * 2 + 1];
+        if (right) {
+          left[i] = leftSample;
+          right[i] = rightSample;
+        } else {
+          left[i] = (leftSample + rightSample) * 0.5;
+        }
       }
-      const consumed = Math.min(this.bufferPtr, left.length * 2);
+      for (let i = framesAvailable; i < left.length; i++) {
+        left[i] = 0;
+        if (right) {
+          right[i] = 0;
+        }
+      }
+      const consumed = framesAvailable * 2;
       this.buffer.copyWithin(0, consumed);
       this.bufferPtr -= consumed;
     } else {
         // silence
         for (let i = 0; i < left.length; i++) {
             left[i] = 0;
-            right[i] = 0;
+            if (right) {
+              right[i] = 0;
+            }
         }
     }
 

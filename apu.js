@@ -130,7 +130,10 @@ class AudioProcessingUnit {
             sampleRate: SAMPLE_RATE,
         });
         await this.audioContext.audioWorklet.addModule('audio-processor.js');
-        this.workletNode = new AudioWorkletNode(this.audioContext, 'gameboy-audio-processor');
+        this.workletNode = new AudioWorkletNode(this.audioContext, 'gameboy-audio-processor', {
+            numberOfOutputs: 1,
+            outputChannelCount: [2],
+        });
         this.workletNode.connect(this.audioContext.destination);
     }
 
