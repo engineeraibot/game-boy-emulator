@@ -389,6 +389,29 @@
         let romReady = false;
         let animationHandle = null;
         let currentRomName = "";
+        let batterySaveTimer = null;
+
+        const scheduleBatterySave = () => {
+          if (!memoryManagementUnit.hasBatteryBackedRam()) return;
+          if (batterySaveTimer) return;
+          batterySaveTimer = setTimeout(() => {
+            batterySaveTimer = null;
+            memoryManagementUnit.saveBatteryRam();
+          }, 1000);
+        };
+
+        const flushBatterySave = () => {
+          if (batterySaveTimer) {
+            clearTimeout(batterySaveTimer);
+            batterySaveTimer = null;
+          }
+          memoryManagementUnit.saveBatteryRam();
+        };
+
+        memoryManagementUnit.onExternalRamWrite = scheduleBatterySave;
+        window.addEventListener("beforeunload", () => {
+          flushBatterySave();
+        });
 
         const setRomLabel = (name) => {
           if (romFilenameLabel) {
@@ -445,9 +468,11 @@
 
         const loadRomFromFile = async (file) => {
           if (!file) return;
+          flushBatterySave();
           const buffer = await file.arrayBuffer();
           romReady = false;
           await memoryManagementUnit.loadROM(buffer);
+          memoryManagementUnit.loadBatteryRam();
           cpu.reset();
           pixelProcessingUnit.reset();
           audioProcessingUnit.reset();

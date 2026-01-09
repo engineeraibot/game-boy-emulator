@@ -30,6 +30,28 @@ function toUint8(source, fallbackLength = 0) {
     return fallbackLength ? new Uint8Array(fallbackLength) : null;
 }
 
+const BATTERY_CARTRIDGE_TYPES = new Set([
+    0x03, // MBC1 + RAM + BATTERY
+    0x06, // MBC2 + BATTERY
+    0x09, // ROM + RAM + BATTERY
+    0x0F, // MBC3 + TIMER + BATTERY
+    0x10, // MBC3 + TIMER + RAM + BATTERY
+    0x13, // MBC3 + RAM + BATTERY
+    0x1B, // MBC5 + RAM + BATTERY
+    0x1E, // MBC5 + RUMBLE + RAM + BATTERY
+    0x22  // MBC7 + SENSOR + RUMBLE + RAM + BATTERY
+]);
+
+function computeRomHash(romData) {
+    if (!romData) return null;
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < romData.length; i++) {
+        hash ^= romData[i];
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return hash >>> 0;
+}
+
 class MemoryManagementUnit {
 
     constructor () {
@@ -39,6 +61,7 @@ class MemoryManagementUnit {
 
         // Cartridge state
         this.rom = null;
+        this.romHash = null;
         this.cartridgeType = 0x00;
         this.mbcType = "ROM_ONLY";
         this.romBankNumber = 1; // switchable bank (behavior varies by MBC)
@@ -47,6 +70,9 @@ class MemoryManagementUnit {
         this.mbc3RtcRegister = null;
         this.externalRamEnabled = false;
         this.ramBanks = new Uint8Array(0x8000); // up to 4 * 8KB RAM banks
+        this.ramSizeCode = 0;
+        this.externalRamDirty = false;
+        this.onExternalRamWrite = null;
 
         // Timers
         this.divCounter = 0;
@@ -79,6 +105,7 @@ class MemoryManagementUnit {
     initializeRomBanks(romData) {
         // Save ROM for banked reads
         this.rom = romData;
+        this.romHash = computeRomHash(romData);
         this.cartridgeType = romData[0x0147] ?? 0x00;
         this.mbcType = this.detectMbcType(this.cartridgeType);
         this.romBankNumber = 1;
@@ -86,7 +113,9 @@ class MemoryManagementUnit {
         this.mbc1Mode = 0;
         this.mbc3RtcRegister = null;
         this.externalRamEnabled = false;
-        this.ramBanks = new Uint8Array(this.getRamSizeBytes(romData[0x0149] ?? 0) || 0x8000);
+        this.ramSizeCode = romData[0x0149] ?? 0;
+        this.ramBanks = new Uint8Array(this.getRamSizeBytes(this.ramSizeCode) || 0x8000);
+        this.externalRamDirty = false;
 
         // Clear memory (VRAM/RAM/OAM/IO) to a known state
         this.memory.fill(0);
@@ -144,6 +173,7 @@ class MemoryManagementUnit {
             mbc1Mode: this.mbc1Mode,
             mbc3RtcRegister: this.mbc3RtcRegister,
             externalRamEnabled: this.externalRamEnabled,
+            ramSizeCode: this.ramSizeCode,
             ramBanksB64: encodeBytes(this.ramBanks),
             divCounter: this.divCounter,
             timerCounter: this.timerCounter,
@@ -158,6 +188,7 @@ class MemoryManagementUnit {
         if (!state) return;
         this.memory = toUint8(state.memoryB64 ?? state.memory, 0x10000);
         this.rom = toUint8(state.romB64 ?? state.rom, 0);
+        this.romHash = this.rom ? computeRomHash(this.rom) : null;
         this.cartridgeType = state.cartridgeType ?? this.cartridgeType ?? 0x00;
         this.mbcType = state.mbcType ?? this.detectMbcType(this.cartridgeType);
         this.romBankNumber = state.romBankNumber ?? 1;
@@ -165,7 +196,8 @@ class MemoryManagementUnit {
         this.mbc1Mode = state.mbc1Mode ?? 0;
         this.mbc3RtcRegister = state.mbc3RtcRegister ?? null;
         this.externalRamEnabled = !!state.externalRamEnabled;
-        const ramLength = this.getRamSizeBytes(state.ramSizeCode ?? null) || this.ramBanks?.length || 0x8000;
+        this.ramSizeCode = state.ramSizeCode ?? this.ramSizeCode ?? 0;
+        const ramLength = this.getRamSizeBytes(this.ramSizeCode ?? null) || this.ramBanks?.length || 0x8000;
         this.ramBanks = toUint8(state.ramBanksB64 ?? state.ramBanks, ramLength);
         this.divCounter = state.divCounter ?? 0;
         this.timerCounter = state.timerCounter ?? 0;
@@ -174,6 +206,79 @@ class MemoryManagementUnit {
         }
         if (typeof state.joypad?.memoryValue === "number") {
           this.joypad.memoryValue = state.joypad.memoryValue;
+        }
+        this.externalRamDirty = false;
+    }
+
+    hasBatteryBackedRam() {
+        if (!this.rom) return false;
+        if (!BATTERY_CARTRIDGE_TYPES.has(this.cartridgeType)) return false;
+        if (!this.ramSizeCode) return false;
+        return !!this.ramBanks?.length;
+    }
+
+    getBatterySaveKey() {
+        if (!this.rom) return null;
+        if (this.romHash === null) {
+            this.romHash = computeRomHash(this.rom);
+        }
+        const hash = (this.romHash ?? 0) >>> 0;
+        return `gb_sram_${hash.toString(16).padStart(8, "0")}`;
+    }
+
+    loadBatteryRam() {
+        if (!this.hasBatteryBackedRam()) return false;
+        if (typeof localStorage === "undefined") return false;
+        const key = this.getBatterySaveKey();
+        if (!key) return false;
+        let raw = null;
+        try {
+            raw = localStorage.getItem(key);
+        } catch (err) {
+            console.warn("Failed to read battery save", err);
+            return false;
+        }
+        if (!raw) return false;
+        let data = null;
+        try {
+            if (raw.trim().startsWith("{")) {
+                const parsed = JSON.parse(raw);
+                data = toUint8(parsed.ramB64 ?? parsed.ram, 0);
+            } else {
+                data = toUint8(raw, 0);
+            }
+        } catch (err) {
+            console.warn("Failed to parse battery save", err);
+            return false;
+        }
+        if (!data || !this.ramBanks) return false;
+        const length = Math.min(data.length, this.ramBanks.length);
+        this.ramBanks.fill(0);
+        if (length > 0) {
+            this.ramBanks.set(data.subarray(0, length));
+        }
+        this.externalRamDirty = false;
+        return true;
+    }
+
+    saveBatteryRam() {
+        if (!this.hasBatteryBackedRam()) return false;
+        if (!this.externalRamDirty) return false;
+        if (typeof localStorage === "undefined") return false;
+        const key = this.getBatterySaveKey();
+        if (!key) return false;
+        try {
+            const payload = JSON.stringify({
+                version: 1,
+                ramSizeCode: this.ramSizeCode,
+                ramB64: encodeBytes(this.ramBanks)
+            });
+            localStorage.setItem(key, payload);
+            this.externalRamDirty = false;
+            return true;
+        } catch (err) {
+            console.warn("Failed to save battery RAM", err);
+            return false;
         }
     }
 
@@ -372,6 +477,10 @@ class MemoryManagementUnit {
             const offset = ramBank * 0x2000 + (address - 0xA000);
             if (offset < this.ramBanks.length) {
                 this.ramBanks[offset] = value;
+                this.externalRamDirty = true;
+                if (typeof this.onExternalRamWrite === "function") {
+                    this.onExternalRamWrite();
+                }
             }
             return;
         }
