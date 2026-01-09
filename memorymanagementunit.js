@@ -35,6 +35,7 @@ class MemoryManagementUnit {
     constructor () {
         this.memory = new Uint8Array(0x10000);
         this.joypad = new Joypad(this);
+        this.apu = null;
 
         // Cartridge state
         this.rom = null;
@@ -194,6 +195,10 @@ class MemoryManagementUnit {
             return this.joypad.read();
         }
 
+        if (address >= 0xFF10 && address <= 0xFF3F) {
+            return this.apu?.readRegister(address) ?? 0xFF;
+        }
+
         // ROM
         if (address < 0x4000) {
             return this.rom ? this.rom[address] : this.memory[address];
@@ -275,6 +280,11 @@ class MemoryManagementUnit {
         }
 
         if (address >= 0xFEA0 && address < 0xFEFF) {
+            return;
+        }
+
+        if (address >= 0xFF10 && address <= 0xFF3F) {
+            this.apu?.writeRegister(address, value);
             return;
         }
 
