@@ -278,6 +278,10 @@
     <script type="text/javascript" src="memorymanagementunit.js"></script>
     <script type="text/javascript" src="cpu.js"></script>
     <script type="text/javascript" src="pixelprocessingunit.js"></script>
+    <script type="text/javascript" src="PulseChannel.js"></script>
+    <script type="text/javascript" src="WaveChannel.js"></script>
+    <script type="text/javascript" src="NoiseChannel.js"></script>
+    <script type="text/javascript" src="apu.js"></script>
   </head>
   <body>
     <main>
@@ -379,6 +383,8 @@
         const memoryManagementUnit = new MemoryManagementUnit();
         const cpu = new Cpu(memoryManagementUnit);
         const pixelProcessingUnit = new PixelProcessingUnit(canvas, memoryManagementUnit);
+        const audioProcessingUnit = new AudioProcessingUnit(memoryManagementUnit);
+        memoryManagementUnit.apu = audioProcessingUnit;
 
         let romReady = false;
         let animationHandle = null;
@@ -444,6 +450,7 @@
           await memoryManagementUnit.loadROM(buffer);
           cpu.reset();
           pixelProcessingUnit.reset();
+          audioProcessingUnit.reset();
           romReady = true;
           currentRomName = file.name;
           setRomLabel(currentRomName);
@@ -458,6 +465,7 @@
             cpu: cpu.getState(),
             mmu: memoryManagementUnit.getState(),
             ppu: pixelProcessingUnit.getState(),
+            apu: audioProcessingUnit.getState(),
           };
         };
 
@@ -493,6 +501,9 @@
             }
             if (snapshot.ppu) {
               pixelProcessingUnit.setState(snapshot.ppu);
+            }
+            if (snapshot.apu) {
+              audioProcessingUnit.setState(snapshot.apu);
             }
             currentRomName = snapshot.romName || currentRomName || "state";
             setRomLabel(currentRomName);
@@ -573,9 +584,8 @@
               const cycles = cpu.executeStep(); // returns cycles used
               memoryManagementUnit.step(cycles);
               pixelProcessingUnit.step(cycles);
+              audioProcessingUnit.step(cycles);
               cyclesThisFrame += cycles;
-
-              // Optional: also step APU here
           }
 
           animationHandle = requestAnimationFrame(frame); // schedule next frame
