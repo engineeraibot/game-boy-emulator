@@ -132,6 +132,12 @@ class AudioProcessingUnit {
         this.scriptProcessor.connect(this.audioContext.destination);
     }
 
+    resume() {
+        if (this.audioContext && this.audioContext.state === 'suspended') {
+            this.audioContext.resume().catch(err => console.error('Failed to resume AudioContext:', err));
+        }
+    }
+
     readRegister(address) {
         if (address >= 0xFF10 && address <= 0xFF14) return this.channel1.readRegister(address);
         if (address >= 0xFF16 && address <= 0xFF19) return this.channel2.readRegister(address);

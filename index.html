@@ -386,6 +386,14 @@
         const audioProcessingUnit = new AudioProcessingUnit(memoryManagementUnit);
         memoryManagementUnit.apu = audioProcessingUnit;
 
+        const initAudioOnGesture = () => {
+          audioProcessingUnit.resume();
+          window.removeEventListener("keydown", initAudioOnGesture);
+          window.removeEventListener("pointerdown", initAudioOnGesture);
+        };
+        window.addEventListener("keydown", initAudioOnGesture);
+        window.addEventListener("pointerdown", initAudioOnGesture);
+
         let romReady = false;
         let animationHandle = null;
         let currentRomName = "";
