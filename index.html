@@ -295,6 +295,9 @@
           <button type="button" id="save-state" class="rom-button">Save State</button>
           <input type="file" id="state-input" accept=".state,application/json" style="display:none" aria-label="Load saved state">
           <button type="button" id="load-state" class="rom-button">Load State</button>
+          <button type="button" id="save-game" class="rom-button">Save Game</button>
+          <input type="file" id="save-input" accept=".sav,application/octet-stream" style="display:none" aria-label="Load save game">
+          <button type="button" id="load-game" class="rom-button">Load Game</button>
           <span id="rom-filename" class="rom-filename" aria-live="polite"></span>
         </div>
         <div class="touch-controls" aria-label="On-screen controls">
@@ -379,6 +382,9 @@
         const saveStateButton = document.getElementById("save-state");
         const loadStateButton = document.getElementById("load-state");
         const stateInput = document.getElementById("state-input");
+        const saveGameButton = document.getElementById("save-game");
+        const loadGameButton = document.getElementById("load-game");
+        const saveInput = document.getElementById("save-input");
 
         const memoryManagementUnit = new MemoryManagementUnit();
         const cpu = new Cpu(memoryManagementUnit);
@@ -392,7 +398,7 @@
         let batterySaveTimer = null;
 
         const scheduleBatterySave = () => {
-          if (!memoryManagementUnit.hasBatteryBackedRam()) return;
+          if (!memoryManagementUnit.hasBatteryBackedStorage()) return;
           if (batterySaveTimer) return;
           batterySaveTimer = setTimeout(() => {
             batterySaveTimer = null;
@@ -405,7 +411,7 @@
             clearTimeout(batterySaveTimer);
             batterySaveTimer = null;
           }
-          memoryManagementUnit.saveBatteryRam();
+          memoryManagementUnit.saveBatteryRam(true);
         };
 
         memoryManagementUnit.onExternalRamWrite = scheduleBatterySave;
@@ -460,6 +466,12 @@
           return `${safeBase}_${now.getFullYear()}_${pad(now.getMonth() + 1)}_${pad(now.getDate())}_${pad(now.getHours())}_${pad(now.getMinutes())}_${pad(now.getSeconds())}.state`;
         };
 
+        const formatSaveFilename = () => {
+          const base = currentRomName ? currentRomName.replace(/\.[^/.]+$/, "") : "save";
+          const safeBase = (base.replace(/[^a-zA-Z0-9_-]+/g, "") || "save").toLowerCase();
+          return `${safeBase}.sav`;
+        };
+
         const startLoopIfNeeded = () => {
           if (!animationHandle) {
             animationHandle = requestAnimationFrame(frame);
@@ -512,6 +524,51 @@
           URL.revokeObjectURL(url);
         };
 
+        const downloadSaveGame = () => {
+          if (!romReady) {
+            console.warn("No ROM loaded; cannot export save.");
+            return;
+          }
+          if (!memoryManagementUnit.hasExternalRam()) {
+            console.warn("This cartridge has no external RAM to export.");
+            return;
+          }
+          const data = memoryManagementUnit.getBatteryRamBytes();
+          if (!data) {
+            console.warn("No save data available to export.");
+            return;
+          }
+          const blob = new Blob([data], { type: "application/octet-stream" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = formatSaveFilename();
+          a.style.display = "none";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        };
+
+        const loadSaveFromFile = async (file) => {
+          if (!file) return;
+          if (!romReady) {
+            console.warn("No ROM loaded; cannot load save.");
+            return;
+          }
+          if (!memoryManagementUnit.hasExternalRam()) {
+            console.warn("This cartridge has no external RAM to load.");
+            return;
+          }
+          const buffer = await file.arrayBuffer();
+          const ok = memoryManagementUnit.setBatteryRamBytes(new Uint8Array(buffer));
+          if (!ok) {
+            console.warn("Failed to apply save data.");
+            return;
+          }
+          memoryManagementUnit.saveBatteryRam(true);
+        };
+
         const loadStateFromFile = async (file) => {
           if (!file) return;
           try {
@@ -557,12 +614,29 @@
           });
         }
 
+        if (saveGameButton) {
+          saveGameButton.addEventListener("click", () => {
+            downloadSaveGame();
+          });
+        }
+
         if (loadStateButton && stateInput) {
           loadStateButton.addEventListener("click", () => stateInput.click());
           stateInput.addEventListener("change", (event) => {
             const file = event.target.files?.[0];
             if (file) {
               loadStateFromFile(file).catch(console.error);
+            }
+            event.target.value = "";
+          });
+        }
+
+        if (loadGameButton && saveInput) {
+          loadGameButton.addEventListener("click", () => saveInput.click());
+          saveInput.addEventListener("change", (event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              loadSaveFromFile(file).catch(console.error);
             }
             event.target.value = "";
           });

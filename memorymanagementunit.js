@@ -42,6 +42,13 @@ const BATTERY_CARTRIDGE_TYPES = new Set([
     0x22  // MBC7 + SENSOR + RUMBLE + RAM + BATTERY
 ]);
 
+const RTC_CARTRIDGE_TYPES = new Set([
+    0x0F, // MBC3 + TIMER + BATTERY
+    0x10  // MBC3 + TIMER + RAM + BATTERY
+]);
+
+const RTC_MAX_SECONDS = 512 * 24 * 60 * 60;
+
 function computeRomHash(romData) {
     if (!romData) return null;
     let hash = 0x811c9dc5;
@@ -72,11 +79,18 @@ class MemoryManagementUnit {
         this.ramBanks = new Uint8Array(0x8000); // up to 4 * 8KB RAM banks
         this.ramSizeCode = 0;
         this.externalRamDirty = false;
+        this.batterySaveInitialized = false;
         this.onExternalRamWrite = null;
+        this.rtc = null;
+        this.rtcLatched = null;
+        this.rtcLatchValue = 0;
+        this.rtcDirty = false;
 
         // Timers
         this.divCounter = 0;
         this.timerCounter = 0;
+
+        this.resetRtc();
     }
 
     async loadROM(romSource) {
@@ -116,6 +130,8 @@ class MemoryManagementUnit {
         this.ramSizeCode = romData[0x0149] ?? 0;
         this.ramBanks = new Uint8Array(this.getRamSizeBytes(this.ramSizeCode) || 0x8000);
         this.externalRamDirty = false;
+        this.batterySaveInitialized = false;
+        this.resetRtc();
 
         // Clear memory (VRAM/RAM/OAM/IO) to a known state
         this.memory.fill(0);
@@ -163,6 +179,9 @@ class MemoryManagementUnit {
     }
 
     getState() {
+        if (this.hasRtc()) {
+            this.syncRtc();
+        }
         return {
             memoryB64: encodeBytes(this.memory),
             romB64: this.rom ? encodeBytes(this.rom) : null,
@@ -175,6 +194,14 @@ class MemoryManagementUnit {
             externalRamEnabled: this.externalRamEnabled,
             ramSizeCode: this.ramSizeCode,
             ramBanksB64: encodeBytes(this.ramBanks),
+            rtc: this.hasRtc() ? {
+                baseSeconds: this.rtc?.baseSeconds ?? 0,
+                baseTimestamp: this.rtc?.baseTimestamp ?? Date.now(),
+                halt: !!this.rtc?.halt,
+                carry: !!this.rtc?.carry
+            } : null,
+            rtcLatched: this.rtcLatched ? { ...this.rtcLatched } : null,
+            rtcLatchValue: this.rtcLatchValue ?? 0,
             divCounter: this.divCounter,
             timerCounter: this.timerCounter,
             joypad: {
@@ -207,14 +234,70 @@ class MemoryManagementUnit {
         if (typeof state.joypad?.memoryValue === "number") {
           this.joypad.memoryValue = state.joypad.memoryValue;
         }
+        this.resetRtc();
+        if (state.rtc) {
+            this.rtc = {
+                baseSeconds: state.rtc.baseSeconds ?? 0,
+                baseTimestamp: state.rtc.baseTimestamp ?? Date.now(),
+                halt: !!state.rtc.halt,
+                carry: !!state.rtc.carry
+            };
+        }
+        this.rtcLatched = state.rtcLatched ? { ...state.rtcLatched } : null;
+        this.rtcLatchValue = state.rtcLatchValue ?? 0;
+        this.rtcDirty = false;
         this.externalRamDirty = false;
     }
 
-    hasBatteryBackedRam() {
+    resetRtc() {
+        this.rtc = {
+            baseSeconds: 0,
+            baseTimestamp: Date.now(),
+            halt: false,
+            carry: false
+        };
+        this.rtcLatched = null;
+        this.rtcLatchValue = 0;
+        this.rtcDirty = false;
+    }
+
+    hasExternalRam() {
+        return this.getRamSizeBytes(this.ramSizeCode ?? 0) > 0;
+    }
+
+    isBatteryCartridge() {
+        return BATTERY_CARTRIDGE_TYPES.has(this.cartridgeType);
+    }
+
+    hasRtc() {
+        return RTC_CARTRIDGE_TYPES.has(this.cartridgeType);
+    }
+
+    hasBatteryBackedStorage() {
         if (!this.rom) return false;
-        if (!BATTERY_CARTRIDGE_TYPES.has(this.cartridgeType)) return false;
-        if (!this.ramSizeCode) return false;
-        return !!this.ramBanks?.length;
+        if (!this.isBatteryCartridge()) return false;
+        return this.hasExternalRam() || this.hasRtc();
+    }
+
+    getBatteryRamBytes() {
+        if (!this.hasExternalRam()) return null;
+        return this.ramBanks ? this.ramBanks.slice() : null;
+    }
+
+    setBatteryRamBytes(source) {
+        if (!this.hasExternalRam()) return false;
+        const data = toUint8(source, 0);
+        if (!data || !this.ramBanks) return false;
+        const length = Math.min(data.length, this.ramBanks.length);
+        this.ramBanks.fill(0);
+        if (length > 0) {
+            this.ramBanks.set(data.subarray(0, length));
+        }
+        this.externalRamDirty = true;
+        if (typeof this.onExternalRamWrite === "function") {
+            this.onExternalRamWrite();
+        }
+        return true;
     }
 
     getBatterySaveKey() {
@@ -226,8 +309,138 @@ class MemoryManagementUnit {
         return `gb_sram_${hash.toString(16).padStart(8, "0")}`;
     }
 
+    applyRtcSave(rtcData) {
+        if (!this.hasRtc() || !rtcData) return;
+        const baseSeconds = Number.isFinite(rtcData.baseSeconds) ? rtcData.baseSeconds : 0;
+        const baseTimestamp = Number.isFinite(rtcData.baseTimestamp) ? rtcData.baseTimestamp : Date.now();
+        this.rtc = {
+            baseSeconds: ((baseSeconds % RTC_MAX_SECONDS) + RTC_MAX_SECONDS) % RTC_MAX_SECONDS,
+            baseTimestamp,
+            halt: !!rtcData.halt,
+            carry: !!rtcData.carry
+        };
+    }
+
+    syncRtc() {
+        if (!this.hasRtc()) return;
+        if (!this.rtc) {
+            this.resetRtc();
+            return;
+        }
+        if (this.rtc.halt) return;
+        const now = Date.now();
+        if (!Number.isFinite(this.rtc.baseTimestamp)) {
+            this.rtc.baseTimestamp = now;
+            return;
+        }
+        let elapsed = Math.floor((now - this.rtc.baseTimestamp) / 1000);
+        if (elapsed <= 0) return;
+        let total = this.rtc.baseSeconds + elapsed;
+        if (total >= RTC_MAX_SECONDS) {
+            this.rtc.carry = true;
+            total = total % RTC_MAX_SECONDS;
+        }
+        this.rtc.baseSeconds = total;
+        this.rtc.baseTimestamp += elapsed * 1000;
+    }
+
+    getRtcParts() {
+        if (!this.hasRtc()) {
+            return { seconds: 0, minutes: 0, hours: 0, days: 0, halt: false, carry: false };
+        }
+        this.syncRtc();
+        const baseSeconds = this.rtc?.baseSeconds ?? 0;
+        const total = ((baseSeconds % RTC_MAX_SECONDS) + RTC_MAX_SECONDS) % RTC_MAX_SECONDS;
+        const seconds = total % 60;
+        const minutes = Math.floor(total / 60) % 60;
+        const hours = Math.floor(total / 3600) % 24;
+        const days = Math.floor(total / 86400) % 512;
+        return {
+            seconds,
+            minutes,
+            hours,
+            days,
+            halt: !!this.rtc?.halt,
+            carry: !!this.rtc?.carry
+        };
+    }
+
+    latchRtc() {
+        if (!this.hasRtc()) return;
+        this.rtcLatched = this.getRtcParts();
+    }
+
+    readRtcRegister(register) {
+        if (!this.hasRtc()) return 0xFF;
+        const source = this.rtcLatched ?? this.getRtcParts();
+        switch (register) {
+            case 0x08: return source.seconds & 0x3F;
+            case 0x09: return source.minutes & 0x3F;
+            case 0x0A: return source.hours & 0x1F;
+            case 0x0B: return source.days & 0xFF;
+            case 0x0C: {
+                const dayHigh = (source.days >> 8) & 0x01;
+                const halt = source.halt ? 0x40 : 0x00;
+                const carry = source.carry ? 0x80 : 0x00;
+                return dayHigh | halt | carry;
+            }
+            default: return 0xFF;
+        }
+    }
+
+    writeRtcRegister(register, value) {
+        if (!this.hasRtc()) return;
+        const current = this.getRtcParts();
+        let seconds = current.seconds;
+        let minutes = current.minutes;
+        let hours = current.hours;
+        let days = current.days;
+        switch (register) {
+            case 0x08:
+                seconds = Math.min(value & 0x3F, 59);
+                break;
+            case 0x09:
+                minutes = Math.min(value & 0x3F, 59);
+                break;
+            case 0x0A:
+                hours = Math.min(value & 0x1F, 23);
+                break;
+            case 0x0B:
+                days = (days & 0x100) | value;
+                break;
+            case 0x0C: {
+                const dayHigh = value & 0x01;
+                const nextHalt = (value & 0x40) !== 0;
+                const nextCarry = (value & 0x80) !== 0;
+                days = (days & 0xFF) | (dayHigh << 8);
+                if (nextHalt && !this.rtc.halt) {
+                    this.syncRtc();
+                    this.rtc.halt = true;
+                } else if (!nextHalt && this.rtc.halt) {
+                    this.rtc.halt = false;
+                    this.rtc.baseTimestamp = Date.now();
+                }
+                this.rtc.carry = nextCarry;
+                break;
+            }
+            default:
+                return;
+        }
+        days &= 0x1FF;
+        const total = ((days * 24 + hours) * 60 + minutes) * 60 + seconds;
+        this.rtc.baseSeconds = total % RTC_MAX_SECONDS;
+        if (!this.rtc.halt) {
+            this.rtc.baseTimestamp = Date.now();
+        }
+        this.rtcDirty = true;
+        this.externalRamDirty = true;
+        if (typeof this.onExternalRamWrite === "function") {
+            this.onExternalRamWrite();
+        }
+    }
+
     loadBatteryRam() {
-        if (!this.hasBatteryBackedRam()) return false;
+        if (!this.hasBatteryBackedStorage()) return false;
         if (typeof localStorage === "undefined") return false;
         const key = this.getBatterySaveKey();
         if (!key) return false;
@@ -240,41 +453,66 @@ class MemoryManagementUnit {
         }
         if (!raw) return false;
         let data = null;
+        let parsed = null;
+        let loaded = false;
         try {
             if (raw.trim().startsWith("{")) {
-                const parsed = JSON.parse(raw);
-                data = toUint8(parsed.ramB64 ?? parsed.ram, 0);
-            } else {
+                parsed = JSON.parse(raw);
+                if (this.hasExternalRam()) {
+                    data = toUint8(parsed.ramB64 ?? parsed.ram, 0);
+                }
+            } else if (this.hasExternalRam()) {
                 data = toUint8(raw, 0);
             }
         } catch (err) {
             console.warn("Failed to parse battery save", err);
             return false;
         }
-        if (!data || !this.ramBanks) return false;
-        const length = Math.min(data.length, this.ramBanks.length);
-        this.ramBanks.fill(0);
-        if (length > 0) {
-            this.ramBanks.set(data.subarray(0, length));
+        if (data && this.ramBanks) {
+            const length = Math.min(data.length, this.ramBanks.length);
+            this.ramBanks.fill(0);
+            if (length > 0) {
+                this.ramBanks.set(data.subarray(0, length));
+            }
+            loaded = true;
         }
+        if (parsed?.rtc && this.hasRtc()) {
+            this.applyRtcSave(parsed.rtc);
+            loaded = true;
+        }
+        if (!loaded) return false;
         this.externalRamDirty = false;
+        this.rtcDirty = false;
+        this.batterySaveInitialized = true;
         return true;
     }
 
-    saveBatteryRam() {
-        if (!this.hasBatteryBackedRam()) return false;
-        if (!this.externalRamDirty) return false;
+    saveBatteryRam(force = false) {
+        if (!this.hasBatteryBackedStorage()) return false;
+        if (this.hasRtc()) {
+            this.syncRtc();
+        }
+        const shouldSave = force || this.externalRamDirty || this.rtcDirty || (this.hasRtc() && !this.batterySaveInitialized);
+        if (!shouldSave) return false;
         if (typeof localStorage === "undefined") return false;
         const key = this.getBatterySaveKey();
         if (!key) return false;
         try {
             const payload = JSON.stringify({
-                version: 1,
+                version: 2,
                 ramSizeCode: this.ramSizeCode,
-                ramB64: encodeBytes(this.ramBanks)
+                ramB64: this.hasExternalRam() ? encodeBytes(this.ramBanks) : null,
+                rtc: this.hasRtc() ? {
+                    baseSeconds: this.rtc?.baseSeconds ?? 0,
+                    baseTimestamp: this.rtc?.baseTimestamp ?? Date.now(),
+                    halt: !!this.rtc?.halt,
+                    carry: !!this.rtc?.carry
+                } : null
             });
             localStorage.setItem(key, payload);
             this.externalRamDirty = false;
+            this.rtcDirty = false;
+            this.batterySaveInitialized = true;
             return true;
         } catch (err) {
             console.warn("Failed to save battery RAM", err);
@@ -324,15 +562,7 @@ class MemoryManagementUnit {
                 return 0xFF;
             }
             if (this.mbcType === "MBC3" && this.mbc3RtcRegister !== null) {
-                // Simple stub RTC registers
-                switch (this.mbc3RtcRegister) {
-                    case 0x08: return 0; // seconds
-                    case 0x09: return 0; // minutes
-                    case 0x0A: return 0; // hours
-                    case 0x0B: return 0; // lower day
-                    case 0x0C: return 0; // upper day + control
-                    default: return 0;
-                }
+                return this.readRtcRegister(this.mbc3RtcRegister);
             }
             const ramBank = this.getCurrentRamBankNumber();
             const offset = ramBank * 0x2000 + (address - 0xA000);
@@ -415,8 +645,13 @@ class MemoryManagementUnit {
                 }
                 return;
             }
-            // Latch clock (ignored for now)
+            // Latch clock
             if (address >= 0x6000 && address < 0x8000) {
+                const latchValue = value & 0x01;
+                if (this.rtcLatchValue === 0 && latchValue === 1) {
+                    this.latchRtc();
+                }
+                this.rtcLatchValue = latchValue;
                 return;
             }
         } else if (this.mbcType === "MBC5") {
@@ -470,7 +705,7 @@ class MemoryManagementUnit {
                 return;
             }
             if (this.mbcType === "MBC3" && this.mbc3RtcRegister !== null) {
-                // Stub RTC write ignored
+                this.writeRtcRegister(this.mbc3RtcRegister, value);
                 return;
             }
             const ramBank = this.getCurrentRamBankNumber();
