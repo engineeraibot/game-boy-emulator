@@ -192,6 +192,43 @@
         font-weight: 600;
       }
 
+      .dropdown {
+        position: relative;
+        display: none;
+      }
+
+      .dropdown-content {
+        display: none;
+        position: absolute;
+        background-color: #f1f1f1;
+        min-width: 120px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        z-index: 1;
+        border-radius: 10px;
+        right: 0;
+        margin-top: 4px;
+        overflow: hidden;
+      }
+
+      .dropdown-content .rom-button {
+        display: block;
+        width: 100%;
+        text-align: left;
+        border-radius: 0;
+        border: none;
+        box-shadow: none;
+        border-bottom: 1px solid #e0e0e0;
+        background: #fafafa;
+      }
+
+      .dropdown-content .rom-button:last-child {
+        border-bottom: none;
+      }
+
+      .dropdown-content.show {
+        display: block;
+      }
+
       footer p {
         margin: 0;
       }
@@ -246,6 +283,23 @@
         .touch-controls {
           display: none;
         }
+
+        .mobile-only {
+          display: none;
+        }
+      }
+
+      @media (max-width: 640px) {
+        #rom-button,
+        #save-state,
+        #load-state,
+        #save-game,
+        #load-game {
+          display: none;
+        }
+        .mobile-only {
+          display: inline-block;
+        }
       }
 
       @media (max-height: 700px) {
@@ -298,6 +352,16 @@
           <button type="button" id="save-game" class="rom-button">Save Game</button>
           <input type="file" id="save-input" accept=".sav,application/octet-stream" style="display:none" aria-label="Load save game">
           <button type="button" id="load-game" class="rom-button">Load Game</button>
+          <div class="dropdown mobile-only">
+            <button type="button" id="dropdown-button" class="rom-button">More</button>
+            <div class="dropdown-content" id="dropdown-content">
+              <button type="button" class="rom-button" data-action="rom-button">Load ROM</button>
+              <button type="button" class="rom-button" data-action="save-state">Save State</button>
+              <button type="button" class="rom-button" data-action="load-state">Load State</button>
+              <button type="button" class="rom-button" data-action="save-game">Save Game</button>
+              <button type="button" class="rom-button" data-action="load-game">Load Game</button>
+            </div>
+          </div>
           <span id="rom-filename" class="rom-filename" aria-live="polite"></span>
         </div>
         <div class="touch-controls" aria-label="On-screen controls">
@@ -385,6 +449,8 @@
         const saveGameButton = document.getElementById("save-game");
         const loadGameButton = document.getElementById("load-game");
         const saveInput = document.getElementById("save-input");
+        const dropdownButton = document.getElementById("dropdown-button");
+        const dropdownContent = document.getElementById("dropdown-content");
 
         const memoryManagementUnit = new MemoryManagementUnit();
         const cpu = new Cpu(memoryManagementUnit);
@@ -605,6 +671,28 @@
               loadRomFromFile(file).catch(console.error);
             }
             event.target.value = "";
+          });
+        }
+
+        if (dropdownButton && dropdownContent) {
+          dropdownButton.addEventListener("click", () => {
+            dropdownContent.classList.toggle("show");
+          });
+
+          dropdownContent.addEventListener("click", (event) => {
+            const action = event.target.dataset.action;
+            if (action) {
+              document.getElementById(action).click();
+              dropdownContent.classList.remove("show");
+            }
+          });
+
+          window.addEventListener("click", (event) => {
+            if (!event.target.matches("#dropdown-button")) {
+              if (dropdownContent.classList.contains("show")) {
+                dropdownContent.classList.remove("show");
+              }
+            }
           });
         }
 
