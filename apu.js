@@ -248,5 +248,8 @@ class AudioProcessingUnit {
         this.channel2.setState(state.channel2);
         this.channel3.setState(state.channel3);
         this.channel4.setState(state.channel4);
+        if (this.soundEnabled) {
+            this.initAudio().catch(console.error);
+        }
     }
 }
