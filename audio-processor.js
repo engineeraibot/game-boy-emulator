@@ -1,4 +1,4 @@
-const WORKLET_QUEUE_SIZE = 4096;
+const WORKLET_QUEUE_SIZE = 16384;
 
 class GameBoyAudioProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -12,12 +12,13 @@ class GameBoyAudioProcessor extends AudioWorkletProcessor {
   }
 
   enqueue(samples) {
-    if (this.bufferPtr + samples.length > WORKLET_QUEUE_SIZE) {
-      // Not enough space, drop samples
-      return;
+    const space = WORKLET_QUEUE_SIZE - this.bufferPtr;
+    if (space <= 0) {
+      return; // Not enough space, drop samples
     }
-    this.buffer.set(samples, this.bufferPtr);
-    this.bufferPtr += samples.length;
+    const toEnqueue = Math.min(samples.length, space);
+    this.buffer.set(samples.subarray(0, toEnqueue), this.bufferPtr);
+    this.bufferPtr += toEnqueue;
   }
 
   process(inputs, outputs, parameters) {
