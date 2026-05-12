@@ -38,15 +38,62 @@
         padding: 12px 16px;
       }
 
-      canvas {
-        width: min(100vw, 540px);
-        max-width: 540px;
+      .screens {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        width: 100%;
+      }
+
+      #screen {
+        width: min(45vw, 480px);
+        max-width: 480px;
         max-height: 70vh;
         aspect-ratio: 160 / 144;
         height: auto;
         image-rendering: pixelated;
         background: #000;
         border-radius: 8px;
+      }
+
+      #screen3d {
+        width: min(45vw, 540px);
+        max-width: 540px;
+        max-height: 70vh;
+        aspect-ratio: 160 / 144;
+        height: auto;
+        background: #0e2e1f;
+        border-radius: 8px;
+        cursor: grab;
+        display: block;
+        touch-action: none;
+      }
+
+      .view-label {
+        font-size: 12px;
+        color: #666;
+        text-align: center;
+        margin-top: 4px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+      }
+
+      .view-3d-hint {
+        font-size: 11px;
+        color: #888;
+        text-align: center;
+        margin-top: 2px;
+      }
+
+      .screen-cell {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
       }
 
       footer {
@@ -245,10 +292,11 @@
           justify-content: center;
         }
 
-        canvas {
+        #screen,
+        #screen3d {
           width: 100%;
           max-width: 100%;
-          max-height: 48vh;
+          max-height: 40vh;
         }
 
         .touch-controls {
@@ -275,9 +323,13 @@
       }
 
       @media (min-width: 641px) {
-        canvas {
+        #screen {
           max-height: 72vh;
-          width: min(88vw, 620px);
+          width: min(44vw, 480px);
+        }
+        #screen3d {
+          max-height: 72vh;
+          width: min(44vw, 540px);
         }
 
         .touch-controls {
@@ -308,7 +360,8 @@
           --btn-gap: 4px;
         }
 
-        canvas {
+        #screen,
+        #screen3d {
           max-height: 42vh;
         }
 
@@ -336,10 +389,22 @@
     <script type="text/javascript" src="WaveChannel.js"></script>
     <script type="text/javascript" src="NoiseChannel.js"></script>
     <script id="apu-script" type="text/javascript" src="apu.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script type="text/javascript" src="view3d.js"></script>
   </head>
   <body>
     <main>
-      <canvas id="screen" width="160" height="144"></canvas>
+      <div class="screens">
+        <div class="screen-cell">
+          <canvas id="screen" width="160" height="144"></canvas>
+          <div class="view-label">2D</div>
+        </div>
+        <div class="screen-cell">
+          <canvas id="screen3d"></canvas>
+          <div class="view-label">3D</div>
+          <div class="view-3d-hint">drag to rotate &middot; scroll to zoom</div>
+        </div>
+      </div>
     </main>
     <footer>
       <div class="footer-inner">
@@ -457,6 +522,17 @@
         const pixelProcessingUnit = new PixelProcessingUnit(canvas, memoryManagementUnit);
         const audioProcessingUnit = new AudioProcessingUnit(memoryManagementUnit);
         memoryManagementUnit.apu = audioProcessingUnit;
+
+        // Companion 3D view of the framebuffer
+        const canvas3d = document.getElementById("screen3d");
+        let view3d = null;
+        if (canvas3d && typeof View3D !== "undefined") {
+          try {
+            view3d = new View3D(canvas3d, memoryManagementUnit, pixelProcessingUnit);
+          } catch (err) {
+            console.error("Failed to initialize 3D view", err);
+          }
+        }
 
         let romReady = false;
         let animationHandle = null;
