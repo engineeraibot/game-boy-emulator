@@ -48,9 +48,12 @@ class View3D {
         this._queue = new Int32Array(this.instances);
 
         // Spherical camera coordinates.
-        this.cameraDistance = 230;
+        this.cameraDistance = 250;
         this.cameraTheta = Math.PI / 2;
-        this.cameraPhi = Math.PI / 3.2;
+        this.cameraPhi = Math.PI / 3.5;
+
+        // Current heights for lerping
+        this.currentHeights = new Float32Array(this.instances);
 
         this._lastW = 0;
         this._lastH = 0;
@@ -68,36 +71,54 @@ class View3D {
             antialias: true,
         });
         this.renderer.setPixelRatio(window.devicePixelRatio || 1);
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
         this.scene = new THREE.Scene();
-        const bgColor = new THREE.Color(0x0e2e1f);
+        const bgColor = new THREE.Color(0x1a1a1a); // Darker background for "toy box" feel
         this.scene.background = bgColor;
-        this.scene.fog = new THREE.Fog(bgColor, 260, 720);
+        this.scene.fog = new THREE.Fog(bgColor, 300, 800);
 
-        this.camera = new THREE.PerspectiveCamera(45, 1, 0.1, 2000);
+        this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 2000);
         this.updateCameraPosition();
 
         // Lighting
-        this.scene.add(new THREE.AmbientLight(0xffffff, 0.45));
-        const key = new THREE.DirectionalLight(0xffffff, 0.85);
-        key.position.set(120, 220, 120);
+        this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+
+        const key = new THREE.DirectionalLight(0xffffff, 0.8);
+        key.position.set(60, 150, 60);
+        key.castShadow = true;
+
+        // Optimize shadow camera
+        key.shadow.camera.left = -100;
+        key.shadow.camera.right = 100;
+        key.shadow.camera.top = 100;
+        key.shadow.camera.bottom = -100;
+        key.shadow.mapSize.width = 1024;
+        key.shadow.mapSize.height = 1024;
+
         this.scene.add(key);
-        const fill = new THREE.DirectionalLight(0x9be3b5, 0.3);
-        fill.position.set(-150, 120, -100);
+
+        const fill = new THREE.DirectionalLight(0x9be3b5, 0.2);
+        fill.position.set(-100, 80, -80);
         this.scene.add(fill);
 
         // 1x1x1 box, pivot moved to its bottom face so only matrix[5]
         // (Y scale) needs to change per voxel per frame.
-        // NOTE: do not enable vertexColors here — it'd switch on USE_COLOR
-        // which expects a per-vertex color attribute the BoxGeometry doesn't
-        // have, and the resulting (0,0,0) would multiply the per-instance
-        // color to black.
         const geo = new THREE.BoxGeometry(1, 1, 1);
         geo.translate(0, 0.5, 0);
-        const material = new THREE.MeshLambertMaterial({ color: 0xffffff });
+
+        // Use MeshStandardMaterial for better lighting/shadows
+        const material = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            roughness: 0.7,
+            metalness: 0.2
+        });
 
         this.mesh = new THREE.InstancedMesh(geo, material, this.instances);
         this.mesh.frustumCulled = false;
+        this.mesh.castShadow = true;
+        this.mesh.receiveShadow = true;
 
         const colorArr = new Float32Array(this.instances * 3);
         for (let i = 0; i < colorArr.length; i += 3) {
@@ -111,13 +132,14 @@ class View3D {
         const matArr = this.mesh.instanceMatrix.array;
         const halfW = this.width / 2;
         const halfH = this.height / 2;
+        const scale = 0.98; // Small gap between voxels
         for (let yy = 0; yy < this.height; yy++) {
             for (let xx = 0; xx < this.width; xx++) {
                 const idx = yy * this.width + xx;
                 const off = idx * 16;
-                matArr[off + 0] = 1;
+                matArr[off + 0] = scale;
                 matArr[off + 5] = 1;
-                matArr[off + 10] = 1;
+                matArr[off + 10] = scale;
                 matArr[off + 12] = xx - halfW;
                 matArr[off + 13] = 0;
                 matArr[off + 14] = yy - halfH;
@@ -128,11 +150,16 @@ class View3D {
         this.scene.add(this.mesh);
 
         // Floor under the voxels.
-        const floorGeo = new THREE.PlaneGeometry(this.width + 8, this.height + 8);
-        const floorMat = new THREE.MeshLambertMaterial({ color: 0x123124 });
+        const floorGeo = new THREE.PlaneGeometry(this.width + 100, this.height + 100);
+        const floorMat = new THREE.MeshStandardMaterial({
+            color: 0x123124,
+            roughness: 0.9,
+            metalness: 0.1
+        });
         const floor = new THREE.Mesh(floorGeo, floorMat);
         floor.rotation.x = -Math.PI / 2;
-        floor.position.y = -0.5;
+        floor.position.y = -0.01;
+        floor.receiveShadow = true;
         this.scene.add(floor);
     }
 
@@ -314,6 +341,11 @@ class View3D {
         const isWall = this._isWall;
         const visited = this._visited;
         const N = this.instances;
+        const currentHeights = this.currentHeights;
+
+        // Voxel lerp speed. 1.0 = instant, lower = smoother.
+        const lerpFactor = 0.2;
+        const now = Date.now();
 
         for (let idx = 0; idx < N; idx++) {
             const pi = idx * 4;
@@ -328,26 +360,55 @@ class View3D {
                 frameData[pi + 1] !== bgData[pi + 1] ||
                 frameData[pi + 2] !== bgData[pi + 2];
 
-            let h;
+            let targetH;
             if (isSprite) {
                 // Sprites are forced to objectH + bump so they always stand
                 // clearly above the world, no matter what's under them.
-                h = objectH + bump;
+                targetH = objectH + bump;
             } else if (isWall[idx] || !visited[idx]) {
                 // Wall OR enclosed interior -> uniform object top.
-                h = objectH;
+                targetH = objectH;
             } else {
                 // Open ground: gentle variation from per-pixel darkness.
                 const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-                h = minH + (1 - lum) * heightScale;
+                targetH = minH + (1 - lum) * heightScale;
             }
 
-            matArr[idx * 16 + 5] = h;
+            // Smoothly lerp towards target height.
+            currentHeights[idx] += (targetH - currentHeights[idx]) * lerpFactor;
+
+            let finalH = currentHeights[idx];
+
+            // Add subtle bobbing to sprites
+            if (isSprite) {
+                finalH += Math.sin(now * 0.005 + idx) * 0.5;
+            }
+
+            matArr[idx * 16 + 5] = finalH;
 
             const ci = idx * 3;
-            colArr[ci] = r;
-            colArr[ci + 1] = g;
-            colArr[ci + 2] = b;
+
+            // Fake AO: darken ground pixels adjacent to walls or sprites
+            let ao = 1.0;
+            if (!isSprite && !isWall[idx] && visited[idx]) {
+                const x = idx % this.width;
+                const y = Math.floor(idx / this.width);
+
+                // Check neighbors
+                const check = (nx, ny) => {
+                    if (nx < 0 || nx >= this.width || ny < 0 || ny >= this.height) return false;
+                    const nidx = ny * this.width + nx;
+                    return isWall[nidx] || !visited[nidx];
+                };
+
+                if (check(x - 1, y) || check(x + 1, y) || check(x, y - 1) || check(x, y + 1)) {
+                    ao = 0.75;
+                }
+            }
+
+            colArr[ci] = r * ao;
+            colArr[ci + 1] = g * ao;
+            colArr[ci + 2] = b * ao;
         }
 
         this.mesh.instanceMatrix.needsUpdate = true;
