@@ -44,8 +44,15 @@ class View3D {
 
         // Working buffers, allocated once.
         this._isWall = new Uint8Array(this.instances);
+        this._isSprite = new Uint8Array(this.instances);
         this._visited = new Uint8Array(this.instances);
+        this._labels = new Int32Array(this.instances);
         this._queue = new Int32Array(this.instances);
+
+        // Object pool for 3D models.
+        this.maxObjects = 128;
+        this.objectPool = [];
+        this.activeObjectCount = 0;
 
         // Spherical camera coordinates.
         this.cameraDistance = 230;
@@ -127,6 +134,10 @@ class View3D {
         this.mesh.instanceMatrix.needsUpdate = true;
         this.scene.add(this.mesh);
 
+        this.objectGroup = new THREE.Group();
+        this.scene.add(this.objectGroup);
+        this.initModels();
+
         // Floor under the voxels.
         const floorGeo = new THREE.PlaneGeometry(this.width + 8, this.height + 8);
         const floorMat = new THREE.MeshLambertMaterial({ color: 0x123124 });
@@ -194,6 +205,70 @@ class View3D {
         this.camera.lookAt(0, 6, 0);
     }
 
+    initModels() {
+        for (let i = 0; i < this.maxObjects; i++) {
+            const char = this.createCharacterModel();
+            const bld = this.createBuildingModel();
+            char.visible = false;
+            bld.visible = false;
+            this.objectGroup.add(char);
+            this.objectGroup.add(bld);
+            this.objectPool.push({ char, bld });
+        }
+    }
+
+    createCharacterModel() {
+        const group = new THREE.Group();
+        const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+
+        // Head
+        const head = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 4), mat);
+        head.position.y = 10;
+        group.add(head);
+
+        // Body
+        const body = new THREE.Mesh(new THREE.BoxGeometry(6, 6, 4), mat);
+        body.position.y = 5;
+        group.add(body);
+
+        // Arms
+        const armL = new THREE.Mesh(new THREE.BoxGeometry(2, 5, 2), mat);
+        armL.position.set(-4, 6, 0);
+        group.add(armL);
+        const armR = new THREE.Mesh(new THREE.BoxGeometry(2, 5, 2), mat);
+        armR.position.set(4, 6, 0);
+        group.add(armR);
+
+        // Legs
+        const legL = new THREE.Mesh(new THREE.BoxGeometry(2.5, 4, 2.5), mat);
+        legL.position.set(-1.5, 1, 0);
+        group.add(legL);
+        const legR = new THREE.Mesh(new THREE.BoxGeometry(2.5, 4, 2.5), mat);
+        legR.position.set(1.5, 1, 0);
+        group.add(legR);
+
+        return group;
+    }
+
+    createBuildingModel() {
+        const group = new THREE.Group();
+        const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+
+        // Main block
+        const body = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mat);
+        body.position.y = 0.5;
+        group.add(body);
+
+        // Roof (wedge-ish)
+        const roofGeo = new THREE.ConeGeometry(0.7, 0.5, 4);
+        roofGeo.rotateY(Math.PI / 4);
+        const roof = new THREE.Mesh(roofGeo, mat);
+        roof.position.y = 1.25;
+        group.add(roof);
+
+        return group;
+    }
+
     handleResize() {
         const w = this.canvas.clientWidth;
         const h = this.canvas.clientHeight;
@@ -209,16 +284,17 @@ class View3D {
     // BFS flood-fill from screen-border light pixels marks every light pixel
     // reachable from "outside" as visited. Unvisited light pixels are
     // therefore enclosed by walls — they form the inside of an object.
-    classifyPixels(bgData) {
+    classifyPixels(frameData, bgData) {
         const W = this.width;
         const H = this.height;
         const N = this.instances;
         const isWall = this._isWall;
+        const isSprite = this._isSprite;
         const visited = this._visited;
         const queue = this._queue;
         const wallThresh = this.wallThreshold * 255;
 
-        // 1. Wall mask: luminance test.
+        // 1. Wall mask: luminance test. Identify sprite pixels.
         for (let i = 0; i < N; i++) {
             const pi = i * 4;
             const lum =
@@ -226,6 +302,11 @@ class View3D {
                 0.7152 * bgData[pi + 1] +
                 0.0722 * bgData[pi + 2];
             isWall[i] = lum < wallThresh ? 1 : 0;
+
+            isSprite[i] =
+                frameData[pi] !== bgData[pi] ||
+                frameData[pi + 1] !== bgData[pi + 1] ||
+                frameData[pi + 2] !== bgData[pi + 2] ? 1 : 0;
         }
 
         // 2. Seed BFS with every OPEN pixel on the screen border.
@@ -294,6 +375,98 @@ class View3D {
                 }
             }
         }
+
+        this.performCCL();
+    }
+
+    performCCL() {
+        const W = this.width;
+        const H = this.height;
+        const N = this.instances;
+        const isWall = this._isWall;
+        const isSprite = this._isSprite;
+        const visited = this._visited;
+        const labels = this._labels;
+        const queue = this._queue;
+
+        labels.fill(-1);
+        let nextLabel = 0;
+
+        const objects = [];
+
+        for (let i = 0; i < N; i++) {
+            // Elevated pixels are part of objects: walls, enclosed interiors, or sprites.
+            const isElevated = isWall[i] || !visited[i] || isSprite[i];
+            if (isElevated && labels[i] === -1) {
+                const label = nextLabel++;
+                if (label >= this.maxObjects) break;
+
+                // BFS to find all connected elevated pixels.
+                let qHead = 0;
+                let qTail = 0;
+                queue[qTail++] = i;
+                labels[i] = label;
+
+                let minX = i % W, maxX = i % W;
+                let minY = Math.floor(i / W), maxY = Math.floor(i / W);
+                let sumX = 0, sumY = 0;
+                let spriteCount = 0;
+                let sumR = 0, sumG = 0, sumB = 0;
+
+                const frameData = this.ppu.frameData.data;
+
+                while (qHead < qTail) {
+                    const idx = queue[qHead++];
+                    const x = idx % W;
+                    const y = Math.floor(idx / W);
+
+                    minX = Math.min(minX, x);
+                    maxX = Math.max(maxX, x);
+                    minY = Math.min(minY, y);
+                    maxY = Math.max(maxY, y);
+                    sumX += x;
+                    sumY += y;
+                    if (isSprite[idx]) spriteCount++;
+
+                    const pi = idx * 4;
+                    sumR += frameData[pi];
+                    sumG += frameData[pi + 1];
+                    sumB += frameData[pi + 2];
+
+                    // Check 4-neighbors
+                    const neighbors = [];
+                    if (y > 0) neighbors.push(idx - W);
+                    if (y < H - 1) neighbors.push(idx + W);
+                    if (x > 0) neighbors.push(idx - 1);
+                    if (x < W - 1) neighbors.push(idx + 1);
+
+                    for (const ni of neighbors) {
+                        if (labels[ni] === -1 && (isWall[ni] || !visited[ni] || isSprite[ni])) {
+                            labels[ni] = label;
+                            queue[qTail++] = ni;
+                        }
+                    }
+                }
+
+                const count = qTail;
+                objects.push({
+                    label,
+                    minX, maxX, minY, maxY,
+                    centerX: sumX / count,
+                    centerY: sumY / count,
+                    isCharacter: spriteCount > (count * 0.2), // Heuristic
+                    color: new THREE.Color(
+                        (sumR / count) / 255,
+                        (sumG / count) / 255,
+                        (sumB / count) / 255
+                    ),
+                    width: maxX - minX + 1,
+                    height: maxY - minY + 1,
+                    pixelCount: count
+                });
+            }
+        }
+        this.detectedObjects = objects;
     }
 
     updateFromFrame() {
@@ -302,7 +475,7 @@ class View3D {
         const bgData =
             (this.ppu.bgFrameData && this.ppu.bgFrameData.data) || frameData;
 
-        this.classifyPixels(bgData);
+        this.classifyPixels(frameData, bgData);
 
         const matArr = this.mesh.instanceMatrix.array;
         const colArr = this.mesh.instanceColor.array;
@@ -313,7 +486,43 @@ class View3D {
         const bump = this.spriteBump;
         const isWall = this._isWall;
         const visited = this._visited;
+        const labels = this._labels;
         const N = this.instances;
+
+        const halfW = this.width / 2;
+        const halfH = this.height / 2;
+
+        // Reset models
+        for (let i = 0; i < this.maxObjects; i++) {
+            this.objectPool[i].char.visible = false;
+            this.objectPool[i].bld.visible = false;
+        }
+
+        // Render detected objects as models
+        for (let i = 0; i < this.detectedObjects.length; i++) {
+            const obj = this.detectedObjects[i];
+            const poolEntry = this.objectPool[i];
+            const model = obj.isCharacter ? poolEntry.char : poolEntry.bld;
+
+            model.visible = true;
+            model.position.x = obj.centerX - halfW;
+            model.position.z = obj.centerY - halfH;
+
+            if (obj.isCharacter) {
+                // Character scale is fixed but slightly jittered for "life"
+                model.scale.set(1, 1, 1);
+            } else {
+                // Building scale matches its pixel dimensions
+                model.scale.set(obj.width, objectH, obj.height);
+            }
+
+            // Update model colors
+            model.traverse((node) => {
+                if (node.isMesh) {
+                    node.material.color.copy(obj.color);
+                }
+            });
+        }
 
         for (let idx = 0; idx < N; idx++) {
             const pi = idx * 4;
@@ -322,20 +531,11 @@ class View3D {
             const g = frameData[pi + 1] * inv255;
             const b = frameData[pi + 2] * inv255;
 
-            // Sprite pixels differ from the BG-only buffer.
-            const isSprite =
-                frameData[pi] !== bgData[pi] ||
-                frameData[pi + 1] !== bgData[pi + 1] ||
-                frameData[pi + 2] !== bgData[pi + 2];
-
             let h;
-            if (isSprite) {
-                // Sprites are forced to objectH + bump so they always stand
-                // clearly above the world, no matter what's under them.
-                h = objectH + bump;
-            } else if (isWall[idx] || !visited[idx]) {
-                // Wall OR enclosed interior -> uniform object top.
-                h = objectH;
+            const label = labels[idx];
+            if (label !== -1 && label < this.maxObjects) {
+                // Pixel is part of a replaced object, hide its voxel.
+                h = 0;
             } else {
                 // Open ground: gentle variation from per-pixel darkness.
                 const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
