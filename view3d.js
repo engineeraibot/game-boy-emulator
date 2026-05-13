@@ -53,6 +53,7 @@ class View3D {
         this._tileSolid = new Uint8Array(this.numTiles);
         this._tileVisited = new Uint8Array(this.numTiles);
         this._tileQueue = new Int32Array(this.numTiles);
+        this._pixelQueue = new Int32Array(this.instances);
 
         // Spherical camera coordinates.
         this.cameraDistance = 250;
@@ -291,7 +292,7 @@ class View3D {
         const N = this.instances;
         const labels = this._labels;
         const isSprite = this._isSprite;
-        const queue = this._tileQueue; // Reuse buffer
+        const queue = this._pixelQueue;
 
         labels.fill(-1);
         isSprite.fill(0);
@@ -478,8 +479,8 @@ class View3D {
             const mesh = pool.mesh;
             const ctx = pool.ctx;
 
-            const objW = obj.maxX - obj.minX + 1;
-            const objH = obj.maxY - obj.minY + 1;
+            const objW = Math.max(1, Math.floor(obj.maxX - obj.minX + 1));
+            const objH = Math.max(1, Math.floor(obj.maxY - obj.minY + 1));
 
             pool.canvas.width = objW;
             pool.canvas.height = objH;
