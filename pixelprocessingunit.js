@@ -11,6 +11,8 @@ class PixelProcessingUnit {
         
         // Create an ImageData object to manipulate pixels directly
         this.frameData = this.context.createImageData(160, 144);
+        // Background+Window layer only (no sprites). Used by the 3D view.
+        this.bgFrameData = this.context.createImageData(160, 144);
         this.lcdPreviouslyEnabled = true;
         
         // Game Boy "Green" palette
@@ -57,6 +59,7 @@ class PixelProcessingUnit {
             if (this.lcdPreviouslyEnabled) {
                 // Blank the screen once when LCD turns off
                 this.frameData.data.fill(255);
+                this.bgFrameData.data.fill(255);
                 this.context.putImageData(this.frameData, 0, 0);
             }
             this.lcdPreviouslyEnabled = false;
@@ -250,6 +253,16 @@ class PixelProcessingUnit {
             const bitIndex = 7 - innerX;
             const bgColorIndex = (((byte2 >> bitIndex) & 1) << 1) | ((byte1 >> bitIndex) & 1);
 
+            // Write BG/Window-only color to the dedicated buffer used by the 3D view.
+            const bgp = this.mmu.read8bits(0xFF47);
+            const bgPaletteIndex = (bgp >> (bgColorIndex * 2)) & 0x03;
+            const bgRgb = this.colors[bgPaletteIndex];
+            const bgIdx = (y * 160 + x) * 4;
+            this.bgFrameData.data[bgIdx] = bgRgb[0];
+            this.bgFrameData.data[bgIdx + 1] = bgRgb[1];
+            this.bgFrameData.data[bgIdx + 2] = bgRgb[2];
+            this.bgFrameData.data[bgIdx + 3] = 255;
+
             let finalPaletteIndex;
             let finalColorIndex = bgColorIndex;
 
@@ -310,8 +323,9 @@ class PixelProcessingUnit {
 
             // Write to the canvas buffer
             if (finalPaletteIndex === undefined) {
-                const bgp = this.mmu.read8bits(0xFF47);
-                finalPaletteIndex = (bgp >> (finalColorIndex * 2)) & 0x03;
+                // Reuse the BG palette we already resolved above (still respects
+                // mid-line BGP writes because we read it once per pixel).
+                finalPaletteIndex = bgPaletteIndex;
             }
             const color = this.colors[finalPaletteIndex];
             const canvasIndex = (y * 160 + x) * 4;
@@ -328,6 +342,7 @@ class PixelProcessingUnit {
         const lcdEnabled = (lcdc & 0x80) !== 0;
         if (!lcdEnabled) {
             this.frameData.data.fill(255);
+            this.bgFrameData.data.fill(255);
         }
         this.context.putImageData(this.frameData, 0, 0);
     }
