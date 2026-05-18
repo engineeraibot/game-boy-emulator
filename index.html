@@ -38,15 +38,68 @@
         padding: 12px 16px;
       }
 
-      canvas {
-        width: min(100vw, 540px);
-        max-width: 540px;
+      .stage {
+        display: flex;
+        gap: 20px;
+        align-items: flex-start;
+        justify-content: center;
+        flex-wrap: wrap;
+        width: 100%;
+      }
+
+      .viewport {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .view-label {
+        font-size: 13px;
+        font-weight: 600;
+        color: #444444;
+        text-align: center;
+      }
+
+      .view-label .hint {
+        font-weight: 400;
+        color: #999999;
+        font-size: 11px;
+      }
+
+      #screen,
+      #screen3d {
+        width: min(44vw, 480px);
+        max-width: 480px;
         max-height: 70vh;
         aspect-ratio: 160 / 144;
         height: auto;
-        image-rendering: pixelated;
         background: #000;
         border-radius: 8px;
+      }
+
+      #screen {
+        image-rendering: pixelated;
+      }
+
+      #screen3d {
+        cursor: grab;
+        touch-action: none;
+      }
+
+      #screen3d:active {
+        cursor: grabbing;
+      }
+
+      #detection-hud {
+        font-size: 12px;
+        color: #333333;
+        background: #eef0f8;
+        border: 1px solid #dadce8;
+        border-radius: 6px;
+        padding: 4px 10px;
+        text-align: center;
+        max-width: 480px;
       }
 
       footer {
@@ -245,10 +298,11 @@
           justify-content: center;
         }
 
-        canvas {
+        #screen,
+        #screen3d {
           width: 100%;
           max-width: 100%;
-          max-height: 48vh;
+          max-height: 40vh;
         }
 
         .touch-controls {
@@ -275,9 +329,10 @@
       }
 
       @media (min-width: 641px) {
-        canvas {
+        #screen,
+        #screen3d {
           max-height: 72vh;
-          width: min(88vw, 620px);
+          width: min(44vw, 480px);
         }
 
         .touch-controls {
@@ -308,8 +363,9 @@
           --btn-gap: 4px;
         }
 
-        canvas {
-          max-height: 42vh;
+        #screen,
+        #screen3d {
+          max-height: 52vh;
         }
 
         .small-btn {
@@ -336,10 +392,25 @@
     <script type="text/javascript" src="WaveChannel.js"></script>
     <script type="text/javascript" src="NoiseChannel.js"></script>
     <script id="apu-script" type="text/javascript" src="apu.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script type="text/javascript" src="view3d.js"></script>
   </head>
   <body>
     <main>
-      <canvas id="screen" width="160" height="144"></canvas>
+      <div class="stage">
+        <div class="viewport">
+          <div class="view-label">2D &middot; Game Boy</div>
+          <canvas id="screen" width="160" height="144"></canvas>
+        </div>
+        <div class="viewport">
+          <div class="view-label">
+            3D &middot; Detected assets
+            <span class="hint">drag to orbit &middot; scroll to zoom &middot; shift-drag to pan</span>
+          </div>
+          <canvas id="screen3d"></canvas>
+          <div id="detection-hud">Detected &mdash; tall grass: 0 | fence: 0 | post fence: 0 | flower: 0 | house: 0 | billboard: 0 | grass ground: 0</div>
+        </div>
+      </div>
     </main>
     <footer>
       <div class="footer-inner">
@@ -457,6 +528,20 @@
         const pixelProcessingUnit = new PixelProcessingUnit(canvas, memoryManagementUnit);
         const audioProcessingUnit = new AudioProcessingUnit(memoryManagementUnit);
         memoryManagementUnit.apu = audioProcessingUnit;
+
+        // Experimental 3D companion view (see view3d.js / CLAUDE.md).
+        const canvas3d = document.getElementById("screen3d");
+        const detectionHud = document.getElementById("detection-hud");
+        let view3d = null;
+        try {
+          if (typeof View3D === "function") {
+            view3d = new View3D(canvas3d, memoryManagementUnit, {
+              hudElement: detectionHud,
+            });
+          }
+        } catch (err) {
+          console.error("Failed to initialise 3D view", err);
+        }
 
         let romReady = false;
         let animationHandle = null;
@@ -759,20 +844,28 @@
         bindOnScreenControls(memoryManagementUnit);
 
         function frame() {
-          if (!romReady) {
-            animationHandle = requestAnimationFrame(frame);
-            return;
+          if (romReady) {
+            let cyclesThisFrame = 0;
+
+            while (cyclesThisFrame < CYCLES_PER_FRAME) {
+                memoryManagementUnit.joypad.update();
+                const cycles = cpu.executeStep(); // returns cycles used
+                memoryManagementUnit.step(cycles);
+                pixelProcessingUnit.step(cycles);
+                audioProcessingUnit.step(cycles);
+                cyclesThisFrame += cycles;
+            }
           }
 
-          let cyclesThisFrame = 0;
-
-          while (cyclesThisFrame < CYCLES_PER_FRAME) {
-              memoryManagementUnit.joypad.update();
-              const cycles = cpu.executeStep(); // returns cycles used
-              memoryManagementUnit.step(cycles);
-              pixelProcessingUnit.step(cycles);
-              audioProcessingUnit.step(cycles);
-              cyclesThisFrame += cycles;
+          // Keep the 3D companion view in sync (also renders the empty state
+          // and stays interactive before a ROM is loaded).
+          if (view3d) {
+            try {
+              view3d.update();
+            } catch (err) {
+              console.error("3D view update failed", err);
+              view3d = null;
+            }
           }
 
           animationHandle = requestAnimationFrame(frame); // schedule next frame
