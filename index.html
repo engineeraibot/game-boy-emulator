@@ -767,7 +767,7 @@
           let cyclesThisFrame = 0;
 
           while (cyclesThisFrame < CYCLES_PER_FRAME) {
-              memoryManagementUnit.joypad.update();
+              // Joypad state is refreshed lazily inside joypad.read() on 0xFF00 reads.
               const cycles = cpu.executeStep(); // returns cycles used
               memoryManagementUnit.step(cycles);
               pixelProcessingUnit.step(cycles);

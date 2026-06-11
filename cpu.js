@@ -1,3 +1,6 @@
+// VBlank, LCD STAT, Timer, Serial, Joypad
+const INTERRUPT_VECTORS = [0x40, 0x48, 0x50, 0x58, 0x60];
+
 class Cpu {
 
     constructor(memoryManagementUnit) {
@@ -349,8 +352,12 @@ class Cpu {
     }
 
     handleInterrupts() {
-        const ie = this.memoryManagementUnit.read8bits(0xFFFF);
-        const _if = this.memoryManagementUnit.read8bits(0xFF0F);
+        // IE (0xFFFF) and IF (0xFF0F) fall through to plain memory in the MMU,
+        // so direct access is behaviorally identical and avoids call overhead
+        // on this per-instruction hot path.
+        const memory = this.memoryManagementUnit.memory;
+        const ie = memory[0xFFFF];
+        const _if = memory[0xFF0F];
         const pending = ie & _if;
 
         if (pending === 0) {
@@ -368,16 +375,14 @@ class Cpu {
 
         // Service the highest-priority pending interrupt
         this.interruptMasterEnable = false;
-        const vectors = [0x40, 0x48, 0x50, 0x58, 0x60]; // VBlank, LCD STAT, Timer, Serial, Joypad
         for (let i = 0; i < 5; i++) {
             if (pending & (1 << i)) {
                 // Clear request flag
-                const newIf = _if & ~(1 << i);
-                this.memoryManagementUnit.write8bits(0xFF0F, newIf);
+                memory[0xFF0F] = _if & ~(1 << i);
 
                 // Push PC and jump to vector
                 this.push16bits(this.PC);
-                this.PC = vectors[i];
+                this.PC = INTERRUPT_VECTORS[i];
                 return 20; // Interrupt service time
             }
         }

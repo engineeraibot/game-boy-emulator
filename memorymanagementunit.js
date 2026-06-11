@@ -49,6 +49,9 @@ const RTC_CARTRIDGE_TYPES = new Set([
 
 const RTC_MAX_SECONDS = 512 * 24 * 60 * 60;
 
+// Cycles per TIMA increment for TAC input select 00,01,10,11
+const TIMER_PERIODS = [1024, 16, 64, 256];
+
 function computeRomHash(romData) {
     if (!romData) return null;
     let hash = 0x811c9dc5;
@@ -525,6 +528,22 @@ class MemoryManagementUnit {
     ) {
         address &= 0xFFFF;
 
+        // ROM first: instruction fetches make this by far the most common case.
+        // These ranges are disjoint from all the checks below, so order is safe.
+        if (address < 0x4000) {
+            return this.rom ? this.rom[address] : this.memory[address];
+        }
+
+        if (address < 0x8000) { // switchable bank
+            if (!this.rom) {
+                return this.memory[address];
+            }
+            const bank = this.getCurrentRomBankNumber();
+            const bankOffset = bank * 0x4000;
+            const index = bankOffset + (address - 0x4000);
+            return this.rom[index] ?? 0xFF;
+        }
+
         if (address >= 0xE000 && address < 0xFE00) {
             address -= 0x2000;
         }
@@ -540,21 +559,6 @@ class MemoryManagementUnit {
 
         if (address >= 0xFF10 && address <= 0xFF3F) {
             return this.apu?.readRegister(address) ?? 0xFF;
-        }
-
-        // ROM
-        if (address < 0x4000) {
-            return this.rom ? this.rom[address] : this.memory[address];
-        }
-
-        if (address < 0x8000) { // switchable bank
-            if (!this.rom) {
-                return this.memory[address];
-            }
-            const bank = this.getCurrentRomBankNumber();
-            const bankOffset = bank * 0x4000;
-            const index = bankOffset + (address - 0x4000);
-            return this.rom[index] ?? 0xFF;
         }
 
         if (address >= 0xA000 && address < 0xC000) { // External RAM / RTC
@@ -586,8 +590,7 @@ class MemoryManagementUnit {
         // TIMA
         const tac = this.memory[0xFF07];
         if ((tac & 0x04) !== 0) {
-            const periods = [1024, 16, 64, 256]; // cycles per increment for TAC input select 00,01,10,11
-            const period = periods[tac & 0x03];
+            const period = TIMER_PERIODS[tac & 0x03];
             this.timerCounter += cycles;
             while (this.timerCounter >= period) {
                 this.timerCounter -= period;

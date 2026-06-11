@@ -39,6 +39,9 @@ class Joypad {
     }
 
     read() {
+        // Refresh lazily on read instead of polling every CPU instruction;
+        // the value is always up to date when the game actually reads 0xFF00.
+        this.update();
         return this.memoryValue;
     }
 }

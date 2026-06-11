@@ -93,7 +93,7 @@ class AudioProcessingUnit {
 
         let left = 0;
         let right = 0;
-        const nr51 = this.mmu.read8bits(0xFF25);
+        const nr51 = this.mmu.memory[0xFF25]; // same backing store readRegister returns
 
         if (nr51 & 0x01) right += s1;
         if (nr51 & 0x02) right += s2;
